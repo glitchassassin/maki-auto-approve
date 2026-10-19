@@ -295,8 +295,10 @@ maki.api.register_command({ name = "/auto-approve-test-wake", description = "Res
                     if managed:
                         responses = [(r"Install these packages\?[\s\S]*?\[y/N\]", b"y\n"), (r"\[y/N\]", b"y\n")]
                     elif native_trust_command:
+                        # Project configuration loads before the reloaded TUI is
+                        # ready for input. Wait for its new prompt after /trust.
                         responses = [(r"\[restricted\]", b"/trust\r"),
-                                     (lambda: project_marker.exists(),
+                                     (r"Ask maki to [^\r\n]*?\.\.\.",
                                       b"Run auto_approve_probe once for this local test.\r")]
                     elif outcome == "deny":
                         responses = [(r"Permission Required", b"y")]
