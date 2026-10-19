@@ -21,4 +21,4 @@ fi
 mkdir -p -- "$(dirname -- "$task_target")"
 ln -s -- "$task_source" "$task_target"
 echo "Installed local package: $task_target -> $task_source"
-echo "Restart Maki or run /reload. Existing chats need a new human message."
+echo "Restart Maki or run /reload. Existing chats reuse their recorded user instructions."

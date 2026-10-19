@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Correct the local installer's restart/reload guidance to reflect reuse of
+  recorded user instructions, without requiring a fresh human message.
+
 ## 0.2.1 — 2026-10-19
 
 - Use Maki's recorded user turns as authorization evidence after restart, reload,
