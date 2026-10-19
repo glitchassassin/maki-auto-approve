@@ -11,7 +11,6 @@ import shutil
 import pty
 import re
 import select
-import signal
 import struct
 import subprocess
 import tempfile
@@ -23,6 +22,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
 MAKI = shutil.which("maki")
+VERSION = (ROOT / "VERSION").read_text().strip()
+
+
+def lua_value(value):
+    if isinstance(value, dict):
+        return "{" + ", ".join("[" + json.dumps(key) + "] = " + lua_value(item)
+                               for key, item in value.items()) + "}"
+    if isinstance(value, (list, tuple)):
+        return "{" + ", ".join(lua_value(item) for item in value) + "}"
+    return json.dumps(value, ensure_ascii=False)
 
 
 def run_terminal(command, cwd, env, responses):
@@ -58,28 +67,32 @@ def run_terminal(command, cwd, env, responses):
             if process.poll() is not None:
                 break
         else:
-            os.killpg(process.pid, signal.SIGKILL)
             plain = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", output).decode(errors="replace")
             raise AssertionError(f"Maki terminal timed out at response {step}:\n" + plain[-8000:])
         returncode = process.wait(timeout=3)
         return subprocess.CompletedProcess(command, returncode, output.decode(errors="replace"), ""), step
     finally:
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait(timeout=10)
         os.close(master)
+        if process.poll() is None:
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
 
 
 class NativeTests(unittest.TestCase):
     def run_case(self, *, rule=None, outcome="allow", inspect=False, override=False,
                  malformed=False, timeout=False, project_disabled=False, jit=False,
                  yolo=False, forced_ask=False, trust_project=True, changed_project=False,
-                 interactive=False, managed=False, trust_command=False):
+                 interactive=False, managed=False, native_trust_command=False,
+                 trust_mode="session", global_options=None, project_options=None, global_disabled=False):
         requests = []
         with tempfile.TemporaryDirectory(prefix="maki-auto-approve-") as temporary:
             base = Path(temporary)
             project = base / "project"
             project.mkdir()
+            (project / ".git").mkdir()
             (project / ".maki").mkdir()
             (project / "script.sh").write_text("echo harmless\n")
             config_dir = base / "config" / "maki"
@@ -153,6 +166,18 @@ class NativeTests(unittest.TestCase):
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             port = server.server_address[1]
+            options = { "reviewer_timeout_ms": 100 if timeout else 5000 }
+            options.update(global_options or {})
+            if global_disabled:
+                options["enabled"] = False
+            project_options = dict(project_options or {})
+            if override:
+                project_options["reviewer_model"] = "mock/reviewer"
+            if project_disabled:
+                project_options["enabled"] = False
+            native_policy = {"paths": [str(project.resolve())]} if trust_mode == "policy" and trust_project else {}
+            if native_trust_command:
+                native_policy = {"prompt": False}
             (config_dir / "plugin.toml").write_text('[permissions]\nfs_read=true\nfs_write=true\nrun=true\nnet=true\nenv=true\nagent=true\nnet_hosts=["127.0.0.1"]\n')
             (config_dir / "init.lua").write_text('''
 maki.provider.register({ slug = "mock", display_name = "Mock", codec = "openai",
@@ -168,8 +193,10 @@ maki.api.register_tool({ name = "auto_approve_probe", description = "Run the loc
 maki.setup({ ui = { splash_animation = false },
   provider = { default_model = "mock/worker", allowed_models = { "mock/*" },
   max_retries = 0, max_timeout_retries = 0, connect_timeout_secs = 2 },
-  net = { allowed_private_hosts = { "127.0.0.1" } } })
-'''.replace("PORT", str(port)).replace("EXECUTED", str(project / "executed")))
+  net = { allowed_private_hosts = { "127.0.0.1" } },
+  plugins = { ["maki-auto-approve"] = __OPTIONS__ }, trust = __TRUST__ })
+'''.replace("PORT", str(port)).replace("EXECUTED", str(project / "executed"))
+                .replace("__OPTIONS__", lua_value(options)).replace("__TRUST__", lua_value(native_policy)))
             if forced_ask:
                 with (config_dir / "init.lua").open("a") as init:
                     init.write('\nmaki.api.set_slot("tool.auto_approve_probe.input", function() return nil, { ask = "Human only" } end)\n')
@@ -181,45 +208,46 @@ maki.setup({ ui = { splash_animation = false },
                 subprocess.run(["git", "add", "."], cwd=fixture_repo, check=True)
                 subprocess.run(["git", "-c", "user.name=Maki test", "-c", "user.email=test@example.invalid",
                                 "commit", "-qm", "Integration test fixture"], cwd=fixture_repo, check=True)
-                subprocess.run(["git", "tag", "v0.1.0"], cwd=fixture_repo, check=True)
+                subprocess.run(["git", "tag", "v" + VERSION], cwd=fixture_repo, check=True)
                 expected_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fixture_repo, text=True).strip()
                 with (config_dir / "init.lua").open("a") as init:
                     init.write('\nmaki.pack.add({{ src = ' + json.dumps(str(fixture_repo)) +
-                               ', name = "maki-auto-approve", version = "v0.1.0" }})\n')
+                               ', name = "maki-auto-approve", version = ' + json.dumps("v" + VERSION) + ' }})\n')
             if rule:
                 (config_dir / "permissions.toml").write_text('[auto_approve_probe]\n' + rule + '=["*"]\n')
-            global_settings = "[reviewer]\ntimeout_ms=" + ("100" if timeout else "5000") + "\n"
-            (config_dir / "auto-approve.toml").write_text(global_settings)
-            if override:
-                (project / ".maki" / "auto-approve.toml").write_text('[reviewer]\nmodel="mock/reviewer"\n')
-            if project_disabled:
-                (project / ".maki" / "auto-approve.toml").write_text("enabled=false\n")
-            if override and trust_project:
-                (config_dir / "auto-approve-trust.json").write_text(json.dumps({"version": 1, "projects": {
-                    str(project.resolve()): {"text": (project / ".maki" / "auto-approve.toml").read_text()}}}))
-            if changed_project:
-                with (project / ".maki" / "auto-approve.toml").open("a") as policy:
-                    policy.write("# Project changed after consent.\n")
+            project_marker = project / "project-config-loaded"
+            if project_options:
+                (project / ".maki/plugin.toml").write_text("[permissions]\nfs_write=true\n")
+                (project / ".maki/init.lua").write_text(
+                    "maki.fs.write(" + lua_value(str(project_marker)) + ', "loaded")\n' +
+                    'maki.setup({plugins={["maki-auto-approve"]=' + lua_value(project_options) + '}})\n')
             env = dict(os.environ)
             env["RUST_LOG"] = "info"
             for key, directory in {"XDG_CONFIG_HOME": "config", "XDG_DATA_HOME": "data",
                                    "XDG_STATE_HOME": "state", "XDG_CACHE_HOME": "cache",
                                    "XDG_LOG_HOME": "logs"}.items():
                 env[key] = str(base / directory)
+            if project_options and trust_project and trust_mode == "persisted":
+                subprocess.run([MAKI, "trust", "add", "--yes"], cwd=project, env=env,
+                               check=True, capture_output=True, text=True, timeout=10)
+            if changed_project:
+                with (project / ".maki/init.lua").open("a") as init:
+                    init.write("-- Project edited after native folder trust.\n")
             # Only the named mock model is allowed; no real provider is selected.
             try:
                 command = [MAKI] + ([] if jit else ["--no-jit"]) + (["--yolo"] if yolo else [])
+                if project_options and trust_project and trust_mode == "session" and not native_trust_command:
+                    command += ["--trust"]
                 if interactive or managed:
                     command += ["--exit-on-done", "-m", "mock/worker"]
-                    if not trust_command:
+                    if not native_trust_command:
                         command += ["Run auto_approve_probe once for this local test."]
                     responses = []
                     if managed:
                         responses = [(r"Install these packages\?[\s\S]*?\[y/N\]", b"y\n"), (r"\[y/N\]", b"y\n")]
-                    elif trust_command:
-                        responses = [(r"worker", b"/auto-approve-trust\r"),
-                                     (r"Trust project approval policy", b"y"),
-                                     (lambda: (config_dir / "auto-approve-trust.json").exists(),
+                    elif native_trust_command:
+                        responses = [(r"\[restricted\]", b"/trust\r"),
+                                     (lambda: project_marker.exists(),
                                       b"Run auto_approve_probe once for this local test.\r")]
                     elif outcome == "deny":
                         responses = [(r"Permission Required", b"y")]
@@ -241,12 +269,8 @@ maki.setup({ ui = { splash_animation = false },
             if managed:
                 self.assertIn(expected_commit, (config_dir / "pack-lock.json").read_text())
                 self.assertTrue((base / "data/maki/site/pack-approvals.json").exists(), diagnostic)
-            if trust_command:
-                saved = json.loads((config_dir / "auto-approve-trust.json").read_text())
-                self.assertEqual(saved["projects"][str(project.resolve())]["text"],
-                                 (project / ".maki/auto-approve.toml").read_text())
             return {"executed": (project / "executed").exists(), "reviews": reviews,
-                    "diagnostic": diagnostic, "requests": requests}
+                    "diagnostic": diagnostic, "requests": requests, "project_loaded": project_marker.exists()}
 
     def test_pending_call_is_reviewed_and_approved(self):
         result = self.run_case()
@@ -289,15 +313,71 @@ maki.setup({ ui = { splash_animation = false },
         self.assertTrue(result["executed"], result["diagnostic"])
         self.assertEqual(result["reviews"][0]["model"], "reviewer")
 
-    def test_untrusted_project_does_not_start_reviewer(self):
-        result = self.run_case(override=True, trust_project=False)
+    def test_untrusted_project_uses_global_model_and_rubric(self):
+        result = self.run_case(override=True, trust_project=False,
+            global_options={"policy_rubric": "GLOBAL_RUBRIC"}, project_options={"policy_rubric": "PROJECT_RUBRIC"})
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertEqual(result["reviews"][0]["model"], "worker")
+        self.assertIn("GLOBAL_RUBRIC", json.dumps(result["reviews"][0]))
+        self.assertNotIn("PROJECT_RUBRIC", json.dumps(result["reviews"][0]))
+        self.assertFalse(result["project_loaded"])
+
+    def test_persisted_native_trust_loads_project_settings(self):
+        result = self.run_case(override=True, trust_mode="persisted")
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertEqual(result["reviews"][0]["model"], "reviewer")
+
+    def test_native_trust_policy_loads_project_settings(self):
+        result = self.run_case(override=True, trust_mode="policy")
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertEqual(result["reviews"][0]["model"], "reviewer")
+
+    def test_project_edit_uses_existing_native_folder_trust(self):
+        result = self.run_case(override=True, changed_project=True, trust_mode="persisted")
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertEqual(result["reviews"][0]["model"], "reviewer")
+
+    def test_project_overrides_merge_with_global_package_options(self):
+        result = self.run_case(override=True, inspect=True,
+            global_options={"policy_rubric": "GLOBAL_ONLY_RUBRIC"},
+            project_options={"reviewer_timeout_ms": 3000})
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertEqual(result["reviews"][0]["model"], "reviewer")
+        self.assertIn("GLOBAL_ONLY_RUBRIC", json.dumps(result["reviews"][0]))
+
+    def test_trusted_project_can_replace_rubric(self):
+        result = self.run_case(global_options={"policy_rubric": "GLOBAL_RUBRIC"},
+            project_options={"policy_rubric": "PROJECT_RUBRIC"})
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertIn("PROJECT_RUBRIC", json.dumps(result["reviews"][0]))
+        self.assertNotIn("GLOBAL_RUBRIC", json.dumps(result["reviews"][0]))
+
+    def test_global_package_toggle_disables_review(self):
+        result = self.run_case(global_disabled=True)
         self.assertFalse(result["executed"], result["diagnostic"])
         self.assertEqual(len(result["reviews"]), 0)
 
-    def test_changed_project_policy_requires_new_trust(self):
-        result = self.run_case(override=True, changed_project=True)
+    def test_untrusted_project_cannot_change_package_toggle(self):
+        result = self.run_case(project_disabled=True, trust_project=False)
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertEqual(len(result["reviews"]), 1)
+
+    def test_untrusted_project_cannot_enable_globally_disabled_package(self):
+        result = self.run_case(global_disabled=True, trust_project=False, project_options={"enabled": True})
         self.assertFalse(result["executed"], result["diagnostic"])
         self.assertEqual(len(result["reviews"]), 0)
+
+    def test_invalid_untrusted_project_options_are_ignored(self):
+        result = self.run_case(trust_project=False, project_options={"reviewer_model": 7})
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertEqual(result["reviews"][0]["model"], "worker")
+
+    def test_invalid_native_options_leave_normal_approval_in_control(self):
+        for options in [{"reviewer_timeout_ms": 60000}, {"reviewer_model": 7}, {"unknown": True}]:
+            with self.subTest(options=options):
+                result = self.run_case(global_options=options)
+                self.assertFalse(result["executed"], result["diagnostic"])
+                self.assertEqual(len(result["reviews"]), 0)
 
     def test_interactive_human_can_approve_after_reviewer_denial(self):
         result = self.run_case(outcome="deny", interactive=True)
@@ -309,8 +389,8 @@ maki.setup({ ui = { splash_animation = false },
         self.assertTrue(result["executed"], result["diagnostic"])
         self.assertEqual(len(result["reviews"]), 1, result["diagnostic"])
 
-    def test_interactive_project_policy_confirmation(self):
-        result = self.run_case(override=True, trust_project=False, interactive=True, trust_command=True)
+    def test_native_trust_command_loads_project_options(self):
+        result = self.run_case(override=True, trust_project=False, interactive=True, native_trust_command=True)
         self.assertTrue(result["executed"], result["diagnostic"])
         self.assertEqual(result["reviews"][0]["model"], "reviewer")
 

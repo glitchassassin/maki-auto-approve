@@ -5,6 +5,7 @@ local util = require("auto_approve.util")
 local M = {}
 
 function M.setup()
+  local settings = config.register()
   require("auto_approve.inspect").setup()
   local captured, active, results = context.new(), 0, {}
   local function remember(sid, req, status, reason, assessment, limit)
@@ -49,8 +50,8 @@ function M.setup()
     local assessment
     local ok, thrown = pcall(function()
       local cwd = util.cwd(sid)
-      cfg, error_text = config.load(cwd)
-      if not cfg or not cfg.enabled then return end
+      cfg = util.copy(settings)
+      cfg.root = maki.fs.root(cwd, ".git") or cwd
       if active >= cfg.reviewer.max_concurrent then error_text = "Reviewer concurrency limit reached."; return end
       local prompt, build_err, revision = captured.build(sid, ctx:task_id(), util.copy(req), cfg)
       if not prompt then error_text = build_err; return end
@@ -65,19 +66,13 @@ function M.setup()
       if not ran then error_text = "Review failed: " .. tostring(value); return end
       assessment, error_text = value, run_err
       if not assessment or assessment.outcome ~= "allow" then return end
-      local fresh, refresh_err = config.load(cwd)
-      if not fresh or util.encode(fresh) ~= util.encode(cfg) then
-        error_text = refresh_err or "Configuration changed during review."
-        return
-      end
-      -- All filesystem/trust reads above may yield. No yield may occur between
+      -- Inspection and conversation reads may yield. No yield may occur between
       -- this final authorization/cancellation check and publishing the allow.
       if ctx:cancelled() then error_text = "Call was cancelled during review."; return end
       if captured.revision(sid) ~= revision then error_text = "User instructions changed during review."; return end
       accepted = true
     end)
     if not ok then error_text = "Review failed: " .. tostring(thrown) end
-    if cfg and not cfg.enabled then return prev(req, ctx) end
     local reason = error_text or (assessment and assessment.rationale) or "Review unavailable."
     remember(sid, req, accepted and "approved" or "human review", reason, assessment,
       cfg and cfg.logging.history_size)
@@ -106,7 +101,6 @@ function M.setup()
       win:close()
     end,
   })
-  require("auto_approve.trust_commands").setup()
   return { context = captured, results = results }
 end
 

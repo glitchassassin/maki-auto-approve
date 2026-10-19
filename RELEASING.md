@@ -8,7 +8,7 @@ and tagged entirely locally. A GitHub repository or release is not required.
 ```sh
 lua tests/run.lua
 python3 tests/integration.py
-find lua plugin tests -name '*.lua' -exec luac -p {} +
+find lua plugin tests examples -name '*.lua' -exec luac -p {} \;
 sh -n scripts/install-local.sh
 git diff --check
 ```
@@ -19,8 +19,10 @@ calls, and leave normal Maki configuration unchanged. Managed-install tests make
 their own temporary Git fixture, explicitly accept its install/capability prompts,
 and assert the lockfile commit. The interactive fallback test explicitly approves
 one pending probe in a real terminal after the model declines automatic approval.
+Native trust tests verify restricted, saved, policy-based, `/trust`, and `--trust`
+configuration loading on stock Maki. No patched binary is required.
 
-Review `CHANGELOG.md`, the default/example TOML files, `plugin.toml`, `LICENSE`, and
+Review `CHANGELOG.md`, the global/project Lua examples, `plugin.toml`, `LICENSE`, and
 `NOTICE`. Keep the README's minimum Maki version and CI binary pin in agreement.
 The `OWNER` URL in the README is intentionally a placeholder until a public
 repository is selected; replace it with the actual URL before publishing.
@@ -30,7 +32,7 @@ repository is selected; replace it with the actual URL before publishing.
 Make an ordinary release commit after validation and tag that exact commit:
 
 ```sh
-git tag -a v0.1.0 -m "Maki Auto Approve 0.1.0"
+git tag -a v0.2.0 -m "Maki Auto Approve 0.2.0"
 ```
 
 An existing tag must never be silently moved. Check that the working tree is

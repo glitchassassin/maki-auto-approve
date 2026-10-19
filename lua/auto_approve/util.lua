@@ -7,18 +7,6 @@ function M.copy(value)
   return out
 end
 
-function M.merge(base, override)
-  local out = M.copy(base)
-  for k, v in pairs(override) do
-    if type(v) == "table" and type(out[k]) == "table" then
-      out[k] = M.merge(out[k], v)
-    else
-      out[k] = M.copy(v)
-    end
-  end
-  return out
-end
-
 function M.clip(text, bytes)
   if #text <= bytes then return text end
   local marker = "\n[omitted: byte budget]"

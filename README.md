@@ -14,7 +14,7 @@ After this repository is published, add its Git URL to your global
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/OWNER/maki-auto-approve", version = "v0.1.0" },
+  { src = "https://github.com/OWNER/maki-auto-approve", version = "v0.2.0" },
 })
 ```
 
@@ -27,7 +27,7 @@ The same manager can install a committed local Git repository without publishing
 
 ```lua
 maki.pack.add({
-  { src = "/absolute/path/to/maki-auto-approve", version = "v0.1.0" },
+  { src = "/absolute/path/to/maki-auto-approve", version = "v0.2.0" },
 })
 ```
 
@@ -48,84 +48,85 @@ Maki's legacy `~/.maki` directory. Restart Maki or run `/reload` afterward.
 For existing chats, send a new human message to establish authorization evidence.
 
 To uninstall, remove that symlink and restart or reload Maki. The repository and
-your TOML configuration can stay in place. No remote repository is required.
+your Maki configuration can stay in place. No remote repository is required.
 
 ## Configuration
 
-Optional files, applied in this order:
+Configure the installed package through Maki's `maki.setup()` in your global
+`~/.config/maki/init.lua`:
 
-1. Built-in defaults.
-2. `<maki-config-dir>/auto-approve.toml`, normally `~/.config/maki/auto-approve.toml`.
-3. `<project>/.maki/auto-approve.toml`, after explicit project-policy consent.
-
-The project root is the nearest ancestor containing `.git` (including a worktree
-`.git` file), otherwise the session's working directory. Settings merge by field;
-omitted project settings inherit global values. Strings, including the rubric,
-replace the inherited value. Files are reread for each review, so changes need
-no reload. Invalid configuration returns the call to the normal prompt.
-
-Copy [auto-approve.toml](auto-approve.toml) for a complete configuration and rubric,
-or [examples/project.toml](examples/project.toml) for a small project override.
-Neither file is required to enable the built-in policy.
-
-```toml
-enabled = true
-project_overrides = true # Global only; false ignores all project overrides.
-
-[reviewer]
-model = ""              # Empty or omitted inherits the active Maki model.
-thinking = ""           # Inherit; optional off/minimal/low/medium/high/xhigh/max/adaptive.
-timeout_ms = 45000      # 100–55000; stays inside Maki's 60-second hook window.
-max_inspections = 8     # 1–32 calls per review.
-max_concurrent = 2      # 1–8 active reviews; excess calls go to the human prompt.
-
-[context]
-max_messages = 40       # 1–200 recent transcript messages.
-max_bytes = 48000       # 2048–200000 bytes for the action and conversation payload.
-max_user_bytes = 16000  # 512–64000 bytes of captured human instructions.
-
-[inspection]
-enabled = true
-max_file_bytes = 65536       # 256–262144 bytes per regular UTF-8 file.
-max_directory_entries = 100 # 1–1000 entries in a one-level listing.
-
-[logging]
-history_size = 50       # 1–200 recent results per session, held in memory.
-
-# [policy]
-# rubric = '''Your complete replacement rubric.'''
+```lua
+maki.setup({
+  plugins = {
+    ["maki-auto-approve"] = {
+      reviewer_model = "", -- Inherit the calling model/provider.
+      reviewer_timeout_ms = 45000,
+      inspection_max_file_bytes = 65536,
+      -- policy_rubric = [=[Your complete replacement reviewer rubric.]=],
+    },
+  },
+})
 ```
 
-### Explicit project-policy trust
+Merge this table into an existing `maki.setup()` call; Maki permits one call per
+init file. The package must be installed or declared with `maki.pack.add` so Maki
+recognizes its name. All options are optional; built-in defaults enable review
+using the calling model and the Codex-derived rubric.
 
-When a project supplies overrides, calls return to the normal human prompt until
-you run `/auto-approve-trust`. The command displays the checkout, exact TOML file,
-and the effect on the reviewer model/provider and rubric. Press `y` to confirm;
-closing the window or any other non-navigation key cancels. If you are already
-at a permission prompt, resolve it first, then run the command and retry the task.
+See [examples/global.lua](examples/global.lua) for every option, its default, and
+its valid range. Maki's option API accepts scalars, so names such as
+`reviewer_timeout_ms` and `inspection_max_file_bytes` are flat keys. Set
+`policy_rubric` to a Lua string to replace the whole rubric; Lua's `[=[...]=]`
+notation supports multiline policy text. The default rubric is in
+[lua/auto_approve/policy.lua](lua/auto_approve/policy.lua).
 
-Consent applies to one checkout and the exact file bytes, including comments.
-Any file change requires another confirmation. Trust records live in your global
-Maki config directory as `auto-approve-trust.json`, outside the repository. Use
-`/auto-approve-untrust` to revoke consent. Revocation and new user instructions
-invalidate approvals in flight. No model-facing tool can grant policy trust.
+For project overrides, add settings to `<project>/.maki/init.lua`:
 
-A project can always set `enabled = false` to request human approvals. An empty
-or comment-only file needs no consent. All other overrides require confirmation,
-including selecting another model/provider. An untrusted override never starts
-a reviewer or sends it conversation/file evidence.
+```lua
+maki.setup({
+  plugins = {
+    ["maki-auto-approve"] = {
+      reviewer_timeout_ms = 30000,
+      inspection_max_file_bytes = 32768,
+    },
+  },
+})
+```
 
-This policy consent is separate from Maki's executable `init.lua` folder trust.
-It also applies when Maki's folder is already trusted or started with `--trust`.
-Headless/ACP runs can use previously confirmed policies but cannot grant consent.
-Set `project_overrides = false` globally to ignore every project override; projects
-cannot turn that switch on. Treat the global config and consent store as trusted
-local configuration, with the same filesystem protection as your Maki settings.
+Maki merges global settings with the project settings it loads. Omitted project
+options inherit global values; an explicitly supplied string replaces the global
+string. [examples/project.lua](examples/project.lua) shows a minimal override.
+Use Maki's native `enabled = false` package option to disable automatic reviews
+in the relevant global or trusted project configuration.
 
-The self-contained parser supports the TOML forms used here: bare/dotted keys,
-tables, booleans, decimal integers, and basic/literal strings including multiline
-strings. Other TOML types and unknown settings are rejected. There is no Lua
-evaluation, shell interpolation, environment expansion, or external parser.
+### Native folder trust and reload
+
+Project settings follow [Maki's folder trust](https://maki.sh/docs/folder-trust/).
+When Maki trusts a folder, it loads that folder's `init.lua`, including these
+options. When Maki skips an untrusted project's config, this package receives
+global settings and built-in defaults. This applies to reviewer models, rubrics,
+limits, and the package's `enabled` toggle. No extra project opt-in flag is needed.
+
+Use Maki's normal `/trust`, `maki trust add`, trust-path policy, or one-run
+`--trust` grant. There are no plugin-specific trust prompts, commands, or consent
+records. An edit follows Maki's normal configuration lifecycle; run `/reload` or
+restart Maki to apply it. Native reload rebuilds the package's options and hooks.
+Existing chats need a new human message after reload to restore authorization
+evidence. Until reload, the running package keeps its current settings.
+
+Maki validates option names, scalar types, and minimums. The package also rejects
+unsupported model/thinking values, oversized or empty rubrics, and values above
+its limits before installing any approval hooks. Invalid options cannot grant
+automatic approval; Maki reports the load/configuration error and its native
+permission handling remains authoritative.
+
+### Migrating from the earlier local version
+
+Move settings from `auto-approve.toml` into the Lua package table, for example
+`[reviewer] model` becomes `reviewer_model` and `[policy] rubric` becomes
+`policy_rubric`. The old TOML files and `auto-approve-trust.json` are no longer read
+or written and may be removed. `/auto-approve-trust` and `/auto-approve-untrust`
+are removed. Maki's native folder trust controls all project configuration.
 
 ## Permission behavior
 
@@ -138,7 +139,7 @@ resolution happens first:
 - A pending ordinary prompt invokes the reviewer.
 - A valid policy-consistent allow approves that exact call once, without saving a rule.
 - Denials, uncertainty, invalid JSON, unavailable providers, timeouts, cancellation,
-  missing evidence, changed instructions/configuration, or failed inspections
+  missing evidence, changed instructions, or failed inspections
   return control to the normal permission prompt.
 
 Prompts explicitly forced by another plugin's `ask` hook remain human-only; Maki
@@ -207,11 +208,13 @@ normal Maki configuration. Python 3 is needed only for these integration tests.
 
 The integration suite verifies native allow/deny bypasses, one-call automatic
 approval, real interactive human fallback, headless denial, restricted asynchronous
-inspection, project-policy consent, malformed responses, timeout cleanup, JIT
-execution, and managed Git installation with capability prompts and a locked commit.
+inspection, native folder trust and option merging, malformed responses, timeout
+cleanup, JIT execution, and managed Git installation with capability prompts and
+a locked commit.
 
 The Ubuntu CI workflow pins Maki 0.6.4 and checks its release archive's SHA-256.
-It runs the same local suites, validates TOML, and checks Lua and installer syntax.
+It runs the same local suites, validates the package manifest, and checks Lua,
+example, and installer syntax.
 See [CHANGELOG.md](CHANGELOG.md) for the release history and
 [RELEASING.md](RELEASING.md) for the release procedure.
 
