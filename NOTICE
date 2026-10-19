@@ -1,0 +1,9 @@
+Maki Auto Approve
+
+The default reviewer rubric is adapted from OpenAI Codex's Guardian policy:
+https://github.com/openai/codex/tree/e4568a3538c9cab6627d64ff8cdfc7d98b79b7db/codex-rs/prompts/templates/guardian
+
+OpenAI Codex is licensed under the Apache License, Version 2.0.
+The rubric has been condensed and adapted for Maki's permission prompt,
+human fallback behavior, and restricted read-only inspection tools.
+This project is not affiliated with or endorsed by OpenAI or the Maki project.

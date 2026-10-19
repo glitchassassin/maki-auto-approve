@@ -1,0 +1,11 @@
+min_maki_version = "0.6.4"
+
+# Maki requires all capabilities to wrap undeclared tools (including MCP),
+# and agent.user_message. The reviewer itself receives only our local read tools.
+[permissions]
+fs_read = true
+fs_write = true
+net = true
+run = true
+env = true
+agent = true
