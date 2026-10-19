@@ -1,7 +1,7 @@
 # Releasing
 
-The prepared version is in `VERSION`. This repository can be tested, committed,
-and tagged entirely locally. A GitHub repository or release is not required.
+Releases for [glitchassassin/maki-auto-approve](https://github.com/glitchassassin/maki-auto-approve)
+use annotated Git tags matching `VERSION`.
 
 ## Validate
 
@@ -30,25 +30,26 @@ Review `CHANGELOG.md`, the global/project Lua examples, `plugin.toml`, `LICENSE`
 bundle; review changes to `vendor/codex/source.json` against the intended upstream
 revision when updating the baseline. Keep the README's minimum Maki version and
 CI binary pin in agreement.
-The `OWNER` URL in the README is intentionally a placeholder until a public
-repository is selected; replace it with the actual URL before publishing.
 
-## Prepare a local version
+## Prepare the release
 
-Make an ordinary release commit after validation and tag that exact commit:
+Choose an unused version. Update `VERSION`, the README's pinned installation
+version, and `CHANGELOG.md`. Commit the validated changes and tag that commit:
 
 ```sh
-git tag -a v0.3.0 -m "Maki Auto Approve 0.3.0"
+release_version=$(cat VERSION)
+git tag -a "v$release_version" -m "Maki Auto Approve $release_version"
 ```
 
-An existing tag must never be silently moved. Check that the working tree is
-clean and the tag resolves to the intended release commit. The package manager
-can install this tag using the repository's local absolute path.
+Keep existing tags unchanged. Confirm the working tree is clean and the new tag
+resolves to the intended release commit.
 
-## Publication is a separate action
+## Publish
 
-Creating a remote repository, adding a publishing remote, pushing commits/tags,
-or creating a hosted release requires an explicit request. None of the validation
-scripts, installer, or CI workflow publishes artifacts, pushes tags, or creates
-releases. Once a public repository is selected and publishing is authorized,
-update the README URL, rerun validation, and follow that repository's release policy.
+Push the release commit and annotated tag to `glitchassassin/maki-auto-approve`.
+Wait for the Ubuntu CI workflow to pass, then create a GitHub release from the
+tag using the matching changelog entry as release notes.
+
+Check managed installation from the repository URL and release tag in the README.
+Maki's package manager installs the tagged Git contents; no separate package
+archive is required.

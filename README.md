@@ -9,12 +9,11 @@ the reviewer inherits the current Maki model/provider unless configured otherwis
 
 ## Managed installation
 
-After this repository is published, add its Git URL to your global
-`~/.config/maki/init.lua` (replace `OWNER` with the repository owner):
+Add the package to your global `~/.config/maki/init.lua`:
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/OWNER/maki-auto-approve", version = "v0.3.0" },
+  { src = "https://github.com/glitchassassin/maki-auto-approve", version = "v0.3.0" },
 })
 ```
 
@@ -22,33 +21,6 @@ Maki asks to install the package and approve its requested capabilities. The
 resolved commit is saved in `pack-lock.json`. `/packupdate maki-auto-approve`
 reviews updates; to remove the package, remove its declaration, reload, and run
 `/packdel maki-auto-approve`. Package declarations belong in the global init file.
-
-The same manager can install a committed local Git repository without publishing:
-
-```lua
-maki.pack.add({
-  { src = "/absolute/path/to/maki-auto-approve", version = "v0.3.0" },
-})
-```
-
-Managed installation uses the tagged Git contents. The development installer
-below follows your working checkout, including uncommitted edits. Do not install
-both under the same package name.
-
-## Local development installation
-
-```sh
-sh scripts/install-local.sh
-```
-
-The script creates a symlink under Maki's `site/pack/user/start/` directory. It
-does not modify your configuration or overwrite an existing package. You can
-pass a Maki data directory as its only argument. It honors `XDG_DATA_HOME` and
-Maki's legacy `~/.maki` directory. Restart Maki or run `/reload` afterward.
-Existing chats can use the user instructions already recorded in Maki's history.
-
-To uninstall, remove that symlink and restart or reload Maki. The repository and
-your Maki configuration can stay in place. No remote repository is required.
 
 ## Configuration
 
@@ -121,14 +93,6 @@ unsupported model/thinking values, oversized or empty rubrics, and values above
 its limits before installing any approval hooks. Invalid options cannot grant
 automatic approval; Maki reports the load/configuration error and its native
 permission handling remains authoritative.
-
-### Migrating from the earlier local version
-
-Move settings from `auto-approve.toml` into the Lua package table, for example
-`[reviewer] model` becomes `reviewer_model` and `[policy] rubric` becomes
-`policy_rubric`. The old TOML files and `auto-approve-trust.json` are no longer read
-or written and may be removed. `/auto-approve-trust` and `/auto-approve-untrust`
-are removed. Maki's native folder trust controls all project configuration.
 
 ## Permission behavior
 
@@ -233,6 +197,25 @@ The package logs concise outcomes through Maki's logger; it does not write raw
 actions, file contents, conversation evidence, or rubric text to a separate log.
 
 ## Development
+
+Clone the repository and link your checkout into Maki:
+
+```sh
+git clone https://github.com/glitchassassin/maki-auto-approve.git
+cd maki-auto-approve
+sh scripts/install-local.sh
+```
+
+The installer creates a symlink under Maki's `site/pack/user/start/` directory. It
+does not modify your configuration or overwrite an existing package. It honors
+`XDG_DATA_HOME` and Maki's legacy `~/.maki` directory, and accepts a Maki data
+directory as its only argument. Restart Maki or run `/reload` afterward.
+
+The symlink follows your working checkout, including uncommitted edits. Managed
+installation uses tagged Git contents. Use one installation method per package
+name. To remove a development installation, remove its symlink and reload Maki.
+
+Run checks from the repository root:
 
 ```sh
 lua tests/run.lua
