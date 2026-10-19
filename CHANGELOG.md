@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 — 2026-10-19
+
+- Document installation and development from `glitchassassin/maki-auto-approve`.
+- Remove obsolete prototype migration notes and document the maintainer release process.
+
 ## 0.3.0 — 2026-10-19
 
 - Bundle Codex Guardian's full default policy, policy template, and output contract

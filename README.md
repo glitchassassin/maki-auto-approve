@@ -13,7 +13,7 @@ Add the package to your global `~/.config/maki/init.lua`:
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/glitchassassin/maki-auto-approve", version = "v0.3.0" },
+  { src = "https://github.com/glitchassassin/maki-auto-approve", version = "v0.3.1" },
 })
 ```
 
