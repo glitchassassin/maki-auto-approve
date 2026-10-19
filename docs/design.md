@@ -84,9 +84,12 @@ another account or credential. An explicit reviewer model supports a different
 cost, latency, or judgment tradeoff. Conversation and inspection evidence goes
 to whichever provider reviews the call.
 
-The timeout stays within Maki's hook window; concurrency, input, and inspection
-limits bound the work a review can do. Exceeding a limit returns to normal human
-approval. The [configuration reference](configuration.md#option-reference)
+The timeout covers queuing and review within Maki's hook window. When all review
+slots are occupied, new calls wait in FIFO order. Slots are reserved before
+asynchronous context reads so simultaneous arrivals cannot exceed the limit.
+Cancellation removes pending waiters and releases held slots; expiry returns
+to normal human approval. Input and inspection limits bound the work a review
+can do. The [configuration reference](configuration.md#option-reference)
 lists the defaults and supported ranges.
 
 [Documentation index](README.md)

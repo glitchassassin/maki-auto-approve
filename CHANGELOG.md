@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — 2026-10-19
+
+- Queue excess reviews in FIFO order instead of immediately requesting human
+  approval. Reserve slots before asynchronous context reads to enforce the limit.
+- Apply the configured timeout to queue time and the whole review, with normal
+  permission fallback on expiry and cancellation cleanup for pending slots.
+- Include session, task, and tool-call IDs in queue, start, cancellation, and
+  outcome logs; show tool-call and task IDs in `/auto-approve` history.
+
 ## 0.3.1 — 2026-10-19
 
 - Document installation and development from `glitchassassin/maki-auto-approve`.

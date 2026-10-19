@@ -132,6 +132,162 @@ local function mock()
   return host
 end
 
+-- Park model calls and await callbacks independently, as Maki's host does.
+-- Tests choose which ready coroutine runs next to exercise scheduling races.
+local function concurrent(h)
+  local tasks, current = {}, nil
+  maki.async.spawn = function(fn)
+    local timer = { fn = fn, cancel = function(self) self.cancelled = true end }
+    current.timer = timer
+    return timer
+  end
+  maki.async.await = function(_, register)
+    local task, ready, value = current, false, nil
+    register(function(result) ready, value, task.ready = true, result, true end)
+    if not ready then coroutine.yield("queued") end
+    truthy(ready, "resumed a waiter without a signal")
+    return value
+  end
+  maki.async.on_cancel = function(fn) current.hooks[#current.hooks + 1] = fn end
+  h.ctx.cancelled = function() return current.cancelled end
+  h.during = function() coroutine.yield("model") end
+  local scheduler = {}
+  function scheduler.add(id)
+    local task = { hooks = {}, cancelled = false }
+    task.co = coroutine.create(function()
+      task.result = h.call({ tool = "bash", tool_id = id, input = { command = "PRIVATE_ACTION" }, scopes = { "PRIVATE_SCOPE" } })
+    end)
+    tasks[#tasks + 1] = task
+    return task
+  end
+  function scheduler.step(task)
+    current = task
+    local ok, state = coroutine.resume(task.co)
+    current = nil
+    truthy(ok, state)
+    return state
+  end
+  function scheduler.cancel(task)
+    task.cancelled = true
+    for _, hook in ipairs(task.hooks) do hook("cancelled") end
+  end
+  function scheduler.expire(task)
+    truthy(not task.timer.cancelled)
+    task.timer.fn()
+  end
+  return scheduler
+end
+
+test("excess reviews queue FIFO and reserve slots before async context reads", function()
+  local h = mock(); h.options = { reviewer_max_concurrent = 1 }; h.install(); h.user()
+  local s = concurrent(h)
+  h.during_history = function(n) if n == 1 then coroutine.yield("history") end end
+  local first, second, third = s.add("call-1"), s.add("call-2"), s.add("call-3")
+  eq(s.step(first), "history"); eq(s.step(second), "queued"); eq(s.step(third), "queued")
+  eq(h.model_calls, 0); eq(h.manual_calls, 0)
+  eq(s.step(first), "model"); s.step(first); eq(first.result.decision, "allow")
+  -- A new arrival cannot take the slot already reserved for call-2.
+  local fourth = s.add("call-4"); eq(s.step(fourth), "queued")
+  eq(s.step(second), "model"); s.step(second); eq(second.result.decision, "allow")
+  eq(s.step(third), "model"); s.step(third); eq(third.result.decision, "allow")
+  eq(s.step(fourth), "model"); s.step(fourth); eq(fourth.result.decision, "allow")
+  eq(h.model_calls, 4); eq(h.manual_calls, 0)
+  for _, task in ipairs({ first, second, third, fourth }) do truthy(task.timer.cancelled) end
+end)
+test("queue respects multiple available review slots", function()
+  local h = mock(); h.install(); h.user(); local s = concurrent(h)
+  local first, second, third = s.add("one"), s.add("two"), s.add("three")
+  eq(s.step(first), "model"); eq(s.step(second), "model"); eq(s.step(third), "queued")
+  s.step(second); eq(s.step(third), "model"); eq(h.model_calls, 3)
+  s.step(first); s.step(third); eq(h.manual_calls, 0)
+end)
+test("cancelled queued requests are removed without blocking the next waiter", function()
+  local h = mock(); h.options = { reviewer_max_concurrent = 1 }; h.install(); h.user(); local s = concurrent(h)
+  local first, second, third = s.add("one"), s.add("cancelled"), s.add("three")
+  eq(s.step(first), "model"); eq(s.step(second), "queued"); eq(s.step(third), "queued")
+  s.cancel(second); truthy(second.timer.cancelled); s.step(second)
+  eq(second.result.decision, "manual"); s.step(first)
+  eq(s.step(third), "model"); s.step(third); eq(third.result.decision, "allow"); eq(h.model_calls, 2)
+end)
+test("queued timeouts fall back without opening a reviewer or leaking a slot", function()
+  local h = mock(); h.options = { reviewer_max_concurrent = 1 }; h.install(); h.user(); local s = concurrent(h)
+  local first, second, third = s.add("one"), s.add("expired"), s.add("three")
+  eq(s.step(first), "model"); eq(s.step(second), "queued"); eq(s.step(third), "queued")
+  s.expire(second); s.step(second); eq(second.result.decision, "manual")
+  truthy(h.plugin.results.s1[1].reason:find("while queued", 1, true))
+  s.step(first); eq(s.step(third), "model"); s.step(third); eq(h.model_calls, 2)
+end)
+test("timeout after wakeup cannot start a reviewer", function()
+  local h = mock(); h.options = { reviewer_max_concurrent = 1 }; h.install(); h.user(); local s = concurrent(h)
+  local first, second = s.add("one"), s.add("expired")
+  s.step(first); s.step(second); s.step(first); s.expire(second); s.step(second)
+  eq(second.result.decision, "manual"); eq(h.model_calls, 1)
+  local third = s.add("three"); eq(s.step(third), "model"); s.step(third); eq(third.result.decision, "allow")
+end)
+test("queue wait and running review share one deadline", function()
+  local h = mock(); h.options = { reviewer_max_concurrent = 1 }; h.install(); h.user(); local s = concurrent(h)
+  local first, second = s.add("one"), s.add("two")
+  s.step(first); s.step(second); local original_timer = second.timer
+  s.step(first); eq(s.step(second), "model"); eq(second.timer, original_timer)
+  s.expire(second); s.step(second); eq(second.result.decision, "manual")
+  truthy(h.plugin.results.s1[2].reason:find("timed out", 1, true))
+end)
+test("cancelling a running review frees the next slot and logs its call ID", function()
+  local h = mock(); h.options = { reviewer_max_concurrent = 1 }; h.install(); h.user(); local s = concurrent(h)
+  local first, second = s.add("cancelled-active"), s.add("next")
+  s.step(first); s.step(second); s.cancel(first)
+  truthy(h.logs[#h.logs]:find("tool_call_id=cancelled-active tool=bash: cancelled", 1, true))
+  eq(s.step(second), "model"); s.step(second); eq(second.result.decision, "allow")
+  s.step(first); eq(first.result.decision, "manual")
+end)
+test("cancellation after wakeup releases a reserved slot exactly once", function()
+  local h = mock(); h.options = { reviewer_max_concurrent = 1 }; h.install(); h.user(); local s = concurrent(h)
+  local first, second, third = s.add("one"), s.add("cancelled"), s.add("three")
+  s.step(first); s.step(second); s.step(third); s.step(first); s.cancel(second); s.cancel(second); s.step(second)
+  eq(second.result.decision, "manual"); eq(s.step(third), "model"); s.step(third)
+  eq(third.result.decision, "allow"); eq(h.model_calls, 2)
+end)
+test("review failure releases a slot for the next queued call", function()
+  local h = mock(); h.options = { reviewer_max_concurrent = 1 }; h.install(); h.user(); local s = concurrent(h)
+  local first, second = s.add("failed"), s.add("next")
+  s.step(first); s.step(second); h.prompt_error = true; s.step(first); h.prompt_error = false
+  eq(first.result.decision, "manual"); eq(s.step(second), "model"); s.step(second); eq(second.result.decision, "allow")
+end)
+test("queued reviews build evidence from instructions current when their slot opens", function()
+  local h = mock(); h.options = { reviewer_max_concurrent = 1 }; h.install(); h.user(); local s = concurrent(h)
+  local first, second = s.add("old"), s.add("fresh")
+  s.step(first); s.step(second); h.user("Only inspect files now."); s.step(first)
+  eq(first.result.decision, "manual"); eq(s.step(second), "model")
+  eq(fixtures[h.prompt].user_instructions[2].text, "Only inspect files now.")
+  s.step(second); eq(second.result.decision, "allow")
+end)
+test("session reset invalidates requests still queued", function()
+  local h = mock(); h.options = { reviewer_max_concurrent = 1 }; h.install(); h.user(); local s = concurrent(h)
+  local first, second = s.add("one"), s.add("two")
+  s.step(first); s.step(second); h.callbacks[1]({ data = { session_id = "s1" } })
+  s.step(first); s.step(second); eq(second.result.decision, "manual"); eq(h.model_calls, 1)
+end)
+test("deadline includes context reads and final evidence validation", function()
+  for _, at in ipairs({ 1, 2 }) do
+    local h = mock(); h.install(); h.user()
+    h.during_history = function(n) if n == at then h.timer_fn() end end
+    eq(h.call().decision, "manual"); eq(h.model_calls, at == 1 and 0 or 1)
+    truthy(h.plugin.results.s1[1].reason:find("timed out", 1, true))
+  end
+end)
+test("logs and history correlate outcomes without logging actions", function()
+  local h = mock(); h.install(); h.user(); h.call()
+  eq(h.plugin.results.s1[1].tool_id, "tool-1"); eq(h.plugin.results.s1[1].task_id, "main")
+  for _, line in ipairs(h.logs) do
+    truthy(line:find("session=s1 task=main tool_call_id=tool-1 tool=bash", 1, true))
+    eq(line:find("git status", 1, true), nil)
+  end
+  truthy(h.logs[1]:find(": started", 1, true)); truthy(h.logs[2]:find(": approved", 1, true))
+  h.response = assessment("deny"); h.call({ tool = "bash", tool_id = "bad\n\27id", input = {}, scopes = {} })
+  local line = h.logs[#h.logs]
+  truthy(line:find("tool_call_id=bad  id", 1, true)); eq(line:find("\n", 1, true), nil)
+end)
+
 test("native options preserve defaults and apply scalar overrides", function()
   local h = mock(); h.options = { reviewer_model = "test/model", reviewer_timeout_ms = 1000 }
   h.install(); h.user(); h.call()

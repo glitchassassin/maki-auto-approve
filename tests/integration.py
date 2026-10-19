@@ -88,8 +88,10 @@ class NativeTests(unittest.TestCase):
                  yolo=False, forced_ask=False, trust_project=True, changed_project=False,
                  interactive=False, managed=False, native_trust_command=False,
                  trust_mode="session", global_options=None, project_options=None, global_disabled=False,
-                 resume=False):
+                 resume=False, parallel=1, reviewer_delay=0):
         requests = []
+        review_activity = {"active": 0, "peak": 0}
+        review_lock = threading.Lock()
         seeding = resume
         with tempfile.TemporaryDirectory(prefix="maki-auto-approve-") as temporary:
             base = Path(temporary)
@@ -125,6 +127,11 @@ class NativeTests(unittest.TestCase):
                     has_result = any(message.get("role") == "tool" for message in messages)
                     call = None
                     if is_review:
+                        with review_lock:
+                            review_activity["active"] += 1
+                            review_activity["peak"] = max(review_activity["peak"], review_activity["active"])
+                        if reviewer_delay:
+                            time.sleep(reviewer_delay)
                         if timeout:
                             time.sleep(0.4)
                         if inspect and not has_result:
@@ -143,14 +150,18 @@ class NativeTests(unittest.TestCase):
                     else:
                         text = "done"
                     delta = {"role": "assistant"}
-                    if call:
-                        delta["tool_calls"] = [{"index": 0, "id": "call_" + str(len(requests)),
-                            "type": "function", "function": {"name": call[0], "arguments": json.dumps(call[1])}}]
+                    calls = [call] if call else []
+                    if call and not is_review and parallel > 1:
+                        calls = [("auto_approve_probe", {"value": f"once-{i}"}) for i in range(parallel)]
+                    if calls:
+                        delta["tool_calls"] = [{"index": i, "id": f"call_{len(requests)}_{i}",
+                            "type": "function", "function": {"name": item[0], "arguments": json.dumps(item[1])}}
+                            for i, item in enumerate(calls)]
                     else:
                         delta["content"] = text
                     chunks = [
                         {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
-                        {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls" if call else "stop"}]},
+                        {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls" if calls else "stop"}]},
                         {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20}},
                     ]
                     self.send_response(200)
@@ -165,6 +176,10 @@ class NativeTests(unittest.TestCase):
                         self.wfile.write(b"data: [DONE]\n\n")
                     except (BrokenPipeError, ConnectionResetError):
                         pass
+                    finally:
+                        if is_review:
+                            with review_lock:
+                                review_activity["active"] -= 1
 
             server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
             server.daemon_threads = True
@@ -193,7 +208,11 @@ maki.provider.register({ slug = "mock", display_name = "Mock", codec = "openai",
 maki.api.register_tool({ name = "auto_approve_probe", description = "Run the local integration-test probe once.",
   schema = { type = "object", properties = { value = { type = "string" } }, required = { "value" } },
   permission = "run", permission_scopes = "value",
-  handler = function() maki.fs.write("EXECUTED", "yes"); return "probe executed" end,
+  handler = function(args)
+    maki.fs.write("EXECUTED", "yes")
+    maki.fs.write("EXECUTED" .. "." .. args.value, "yes")
+    return "probe executed"
+  end,
 })
 maki.setup({ ui = { splash_animation = false },
   provider = { default_model = "mock/worker", allowed_models = { "mock/*" },
@@ -300,7 +319,43 @@ maki.api.register_command({ name = "/auto-approve-test-wake", description = "Res
                 self.assertIn(expected_commit, (config_dir / "pack-lock.json").read_text())
                 self.assertTrue((base / "data/maki/site/pack-approvals.json").exists(), diagnostic)
             return {"executed": (project / "executed").exists(), "reviews": reviews,
+                    "executed_calls": len(list(project.glob("executed.*"))),
+                    "peak_reviews": review_activity["peak"], "logs": logs,
                     "diagnostic": diagnostic, "requests": requests, "project_loaded": project_marker.exists()}
+
+    def test_concurrent_calls_queue_and_all_execute_with_correlated_logs(self):
+        for limit in (1, 2):
+            with self.subTest(limit=limit):
+                result = self.run_case(parallel=4, reviewer_delay=0.2,
+                                       global_options={"reviewer_max_concurrent": limit})
+                self.assertEqual(result["executed_calls"], 4, result["diagnostic"])
+                self.assertEqual(len(result["reviews"]), 4, result["diagnostic"])
+                self.assertEqual(result["peak_reviews"], limit, result["diagnostic"])
+                lines = [line for line in result["logs"].splitlines() if "auto-approve: session=" in line]
+                self.assertEqual(sum(": queued" in line for line in lines), 4 - limit, result["diagnostic"])
+                for i in range(4):
+                    call_lines = [line for line in lines if f"tool_call_id=call_1_{i} " in line]
+                    self.assertEqual(sum(": started" in line for line in call_lines), 1, result["diagnostic"])
+                    self.assertEqual(sum(": approved" in line for line in call_lines), 1, result["diagnostic"])
+                    self.assertTrue(all(" task=" in line for line in call_lines), result["diagnostic"])
+                # Neither the pending input nor its permission scope is logged.
+                self.assertFalse(any("once-" in line for line in lines), result["diagnostic"])
+                queued = [re.search(r"tool_call_id=(\S+)", line)[1] for line in lines if ": queued" in line]
+                started = [re.search(r"tool_call_id=(\S+)", line)[1] for line in lines if ": started" in line]
+                self.assertEqual(started[limit:], queued, result["diagnostic"])
+
+    def test_fallback_logs_include_the_reviewed_tool_call_id(self):
+        result = self.run_case(outcome="deny")
+        self.assertRegex(result["logs"], r"auto-approve: session=\S+ task=\S+ tool_call_id=call_1_0 tool=auto_approve_probe: human review")
+
+    def test_queued_timeout_returns_to_normal_gate(self):
+        result = self.run_case(parallel=4, reviewer_delay=0.4,
+                               global_options={"reviewer_max_concurrent": 1, "reviewer_timeout_ms": 100})
+        self.assertFalse(result["executed"], result["diagnostic"])
+        lines = [line for line in result["logs"].splitlines() if "auto-approve: session=" in line]
+        self.assertEqual(sum(": queued" in line for line in lines), 3, result["diagnostic"])
+        self.assertEqual(sum(": human review" in line for line in lines), 4, result["diagnostic"])
+        self.assertTrue(any("timed out while queued" in line for line in lines), result["diagnostic"])
 
     def test_pending_call_is_reviewed_and_approved(self):
         result = self.run_case()

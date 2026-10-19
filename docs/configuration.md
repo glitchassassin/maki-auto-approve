@@ -2,7 +2,7 @@
 
 All options are optional. Without overrides, reviews inherit the calling
 model/provider and thinking setting, use the pinned Codex Guardian security
-policy, and time out after 45 seconds.
+policy, and time out after 45 seconds including time spent in the queue.
 
 ## Global settings
 
@@ -43,9 +43,9 @@ by this plugin.
 | `enabled` | `true` | Boolean; `false` disables the package. |
 | `reviewer_model` | `""` | Empty inherits; otherwise a `provider/model-id` string for a model available in Maki. |
 | `reviewer_thinking` | `""` | Empty inherits; `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `adaptive`. The chosen model must support the setting. |
-| `reviewer_timeout_ms` | `45000` | `100`–`55000`; review deadline within Maki's 60-second hook window. |
+| `reviewer_timeout_ms` | `45000` | `100`–`55000`; total queue and review deadline within Maki's 60-second hook window. |
 | `reviewer_max_inspections` | `8` | `1`–`32`; inspection calls per review. |
-| `reviewer_max_concurrent` | `2` | `1`–`8`; concurrent reviews; excess calls fall back to human approval. |
+| `reviewer_max_concurrent` | `2` | `1`–`8`; concurrent reviews; excess calls wait in FIFO order. |
 | `context_max_messages` | `40` | `1`–`200`; recent conversation messages included as evidence. |
 | `context_max_bytes` | `48000` | `2048`–`200000`; total review context budget, including the action and user instructions. |
 | `context_max_user_bytes` | `16000` | `512`–`64000`; separate budget for recorded user instructions from available history. |
@@ -61,6 +61,12 @@ for the model and thinking options. Lower timeouts, smaller evidence budgets,
 and tighter inspection limits can increase human fallback. Setting
 `inspection_enabled = false` removes inspection tools; the reviewer still
 receives conversation evidence and the pending action.
+
+The concurrency limit applies across the plugin's reviews, including delegated
+tool calls. Waiting calls reserve the next available slots in arrival order.
+`reviewer_timeout_ms` starts when the permission hook receives the call and is
+not restarted when a slot opens. Expiry during either the wait or review returns
+the call to Maki's normal approval prompt. Cancelled waiters leave the queue.
 
 ## Project settings and folder trust
 

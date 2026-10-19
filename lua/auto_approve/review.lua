@@ -67,7 +67,7 @@ function M.parse(text)
   return value
 end
 
-function M.run(ctx, config, prompt, cwd, task)
+function M.run(ctx, config, prompt, cwd, task, ticket)
   local tools, inspections, release = inspect.bind(config, cwd, ctx:session_id(), task)
   -- Only these registered read-only tools are delegated; no shell/MCP tools.
   -- Omit an empty tools table: Maki expects an array, whereas Lua {} is an object.
@@ -78,23 +78,21 @@ function M.run(ctx, config, prompt, cwd, task)
   local opened, session, open_err = pcall(maki.agent.session, ctx, opts)
   if not opened then release(); return nil, "Could not start reviewer: " .. tostring(session) end
   if not session then release(); return nil, "Could not start reviewer: " .. tostring(open_err) end
-  local timed_out, cancelled = false, false
-  local timer = maki.async.spawn(function()
-    maki.async.sleep(config.reviewer.timeout_ms)
-    timed_out = true
-    session:close()
-  end)
+  local cancelled = false
+  ticket.on_timeout(function() session:close() end)
   maki.async.on_cancel(function()
     cancelled = true
-    timer:cancel()
     release()
   end)
-  local ok, result, err = pcall(function() return session:prompt(prompt) end)
-  timer:cancel()
+  local ok, result, err = pcall(function()
+    if ticket.error() then return nil, ticket.error() end
+    return session:prompt(prompt)
+  end)
+  ticket.on_timeout(nil)
   local closed, close_err = pcall(function() session:close() end)
   release()
   if cancelled or ctx:cancelled() then return nil, "Review cancelled." end
-  if timed_out then return nil, "Review timed out; human approval is required." end
+  if ticket.error() then return nil, ticket.error() end
   if not closed then return nil, "Reviewer cleanup failed: " .. tostring(close_err) end
   if not ok then return nil, "Reviewer failed: " .. tostring(result) end
   if err or not result then return nil, "Reviewer failed: " .. tostring(err) end

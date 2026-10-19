@@ -66,7 +66,8 @@ local loopback port and create a controlling terminal.
 The integration suite verifies native allow/deny bypasses, one-call automatic
 approval, interactive human fallback, headless denial, restricted asynchronous
 inspection, native folder trust and option merging, malformed responses,
-timeout cleanup, JIT execution, saved-chat resume without fresh human input,
+timeout cleanup, FIFO queuing under concurrent native calls, correlated tool-call
+logs, JIT execution, saved-chat resume without fresh human input,
 Codex's low/medium-risk outcomes with unknown authorization, minimal/wrapped
 responses, high-risk denial fallback, and managed Git installation with
 capability prompts and a locked commit.

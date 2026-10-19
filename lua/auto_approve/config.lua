@@ -5,9 +5,9 @@ local M = {}
 M.spec = {
   reviewer_model = { default = "", desc = "Reviewer provider/model; empty inherits the calling model." },
   reviewer_thinking = { default = "", desc = "Reviewer thinking level; empty inherits the calling setting." },
-  reviewer_timeout_ms = { default = 45000, min = 100, desc = "Review timeout in milliseconds (100–55000)." },
+  reviewer_timeout_ms = { default = 45000, min = 100, desc = "Total queue and review timeout in milliseconds (100–55000)." },
   reviewer_max_inspections = { default = 8, min = 1, desc = "Read-only inspection calls per review (1–32)." },
-  reviewer_max_concurrent = { default = 2, min = 1, desc = "Concurrent reviews; excess calls need human approval (1–8)." },
+  reviewer_max_concurrent = { default = 2, min = 1, desc = "Concurrent reviews; excess calls wait in order (1–8)." },
   context_max_messages = { default = 40, min = 1, desc = "Recent conversation messages included in a review (1–200)." },
   context_max_bytes = { default = 48000, min = 2048, desc = "Action and conversation context byte budget (2048–200000)." },
   context_max_user_bytes = { default = 16000, min = 512, desc = "Recorded user instruction byte budget (512–64000)." },

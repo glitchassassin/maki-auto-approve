@@ -31,7 +31,7 @@ only for [development checks](development.md).
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/glitchassassin/maki-auto-approve", version = "v0.3.1" },
+  { src = "https://github.com/glitchassassin/maki-auto-approve", version = "v0.4.0" },
 })
 ```
 
@@ -92,7 +92,7 @@ prompts), do not reach the reviewer.
 ## Updates and removal
 
 Run `/packupdate maki-auto-approve` inside Maki to review a proposed update. The
-declaration above selects `v0.3.1`; choose the desired release in `version` when
+declaration above selects `v0.4.0`; choose the desired release in `version` when
 moving to a newer tag. A recorded lockfile commit takes precedence over edits to
 `version` until an update resolves the declaration. Maki shows the old and new
 commits and any capability changes before applying an accepted update. See

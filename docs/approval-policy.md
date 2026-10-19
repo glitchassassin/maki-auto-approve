@@ -14,7 +14,8 @@ permission resolution happens first:
 
 Fallback includes model denials, invalid assessments, unavailable providers,
 timeouts, cancellation, unavailable history, oversized evidence, changed
-instructions, failed inspections, and the reviewer concurrency limit. Prompts
+instructions, and failed inspections. Calls above the reviewer concurrency
+limit wait in FIFO order; their wait counts toward the review timeout. Prompts
 explicitly forced by another plugin's `ask` hook remain human-only; Maki does
 not offer them to this package.
 
@@ -133,13 +134,23 @@ for this when selecting a reviewer and inspection settings.
 ## Review history and logging
 
 Run `/auto-approve` inside Maki to see recent outcomes, risk and authorization
-assessments, and rationales for the current chat. Close the window with `q` or
-Escape. History is held in memory, bounded by `logging_history_size`, and reset
+assessments, rationales, tool-call IDs, and task IDs for the current chat. Close
+the window with `q` or Escape. History is held in memory, bounded by `logging_history_size`, and reset
 when the plugin reloads or the chat resets/ends.
 
 Deferred reviews show a notice before the normal prompt. Maki marks calls
-approved by this plugin in their tool rows. The plugin logs concise outcomes
-through Maki's logger; it does not write raw actions, file contents, conversation
+approved by this plugin in their tool rows. The plugin logs queue, start,
+cancellation, and outcome events through Maki's logger, each with the owning
+session, task, and tool-call ID. For example:
+
+```text
+auto-approve: session=chat-id task=subtask-id tool_call_id=call-id tool=bash: queued
+auto-approve: session=chat-id task=subtask-id tool_call_id=call-id tool=bash: started
+auto-approve: session=chat-id task=subtask-id tool_call_id=call-id tool=bash: approved — Bounded action.
+```
+
+Search Maki's log for `tool_call_id=call-id` to trace one decision. The plugin
+does not write raw actions, file contents, conversation
 evidence, or rubric text to a separate log.
 
 [Documentation index](README.md)
