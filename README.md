@@ -14,7 +14,7 @@ After this repository is published, add its Git URL to your global
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/OWNER/maki-auto-approve", version = "v0.2.0" },
+  { src = "https://github.com/OWNER/maki-auto-approve", version = "v0.2.1" },
 })
 ```
 
@@ -27,7 +27,7 @@ The same manager can install a committed local Git repository without publishing
 
 ```lua
 maki.pack.add({
-  { src = "/absolute/path/to/maki-auto-approve", version = "v0.2.0" },
+  { src = "/absolute/path/to/maki-auto-approve", version = "v0.2.1" },
 })
 ```
 
@@ -45,7 +45,7 @@ The script creates a symlink under Maki's `site/pack/user/start/` directory. It
 does not modify your configuration or overwrite an existing package. You can
 pass a Maki data directory as its only argument. It honors `XDG_DATA_HOME` and
 Maki's legacy `~/.maki` directory. Restart Maki or run `/reload` afterward.
-For existing chats, send a new human message to establish authorization evidence.
+Existing chats can use the user instructions already recorded in Maki's history.
 
 To uninstall, remove that symlink and restart or reload Maki. The repository and
 your Maki configuration can stay in place. No remote repository is required.
@@ -111,8 +111,9 @@ Use Maki's normal `/trust`, `maki trust add`, trust-path policy, or one-run
 `--trust` grant. There are no plugin-specific trust prompts, commands, or consent
 records. An edit follows Maki's normal configuration lifecycle; run `/reload` or
 restart Maki to apply it. Native reload rebuilds the package's options and hooks.
-Existing chats need a new human message after reload to restore authorization
-evidence. Until reload, the running package keeps its current settings.
+Existing chats reuse their recorded user instructions after reload or restart;
+no fresh human message is required. Until reload, the running package keeps its
+current settings.
 
 Maki validates option names, scalar types, and minimums. The package also rejects
 unsupported model/thinking values, oversized or empty rubrics, and values above
@@ -150,22 +151,32 @@ through the same permission hook. Tools that never prompt remain unaffected.
 
 The default Codex-derived rubric assesses intrinsic risk and user authorization
 separately, including sensitive egress, credentials, destruction, and persistent
-security changes. Critical-risk actions and high-risk allows without at least
-medium authorization always defer to a human, even with a custom rubric.
+security changes. Every automatic approval requires at least medium (clearly
+authorized in substance) user authorization. Low or unknown authorization and
+critical-risk actions always defer to a human, even with a custom rubric.
 
 ## Review evidence and inspection
 
-Original human messages from Maki's TUI, ACP, or headless input are captured
-separately from conversation evidence. Plugin-generated messages and assistant
-claims cannot establish user authorization. Recent visible messages and tool
-evidence are included under an untrusted-data label. Thinking and image contents
-are excluded. The exact pending action is never truncated into an approval.
+The package reads Maki's current conversation history, including history restored
+on resume. Visible `user` messages with kind `turn` and only text/image blocks
+are supplied separately as user instructions, in chronological order. Later
+restrictions take priority. Observations, context updates, hidden messages, tool
+results, and assistant summaries cannot independently establish authorization.
+Maki does not expose the original input source in history, so a plugin-generated
+regular user turn has the same provenance as other recorded user turns.
 
-Captured human instructions survive compaction in the current process. They are
-bounded, remain in memory, and are cleared on session reset/end. After a plugin
-reload or process restart, old transcript messages alone cannot grant authority;
-send a fresh human message. Delegated calls use the owning chat's captured human
-instructions. New human instructions invalidate an approval still in flight.
+User instruction selection has its own byte budget and can reach further back
+than the recent conversation window. Omitted instructions and images are labeled;
+thinking and image contents are excluded. The exact pending action is never
+truncated into an approval. If compaction or missing evidence leaves authorization
+unclear, the reviewer must defer to Maki's normal approval prompt. An assistant
+summary cannot restore authorization from user instructions lost to compaction.
+
+Delegated calls use the owning chat's recorded user instructions. Before accepting
+an allow, the package rereads and compares those instructions. New human input,
+changed history, session reset/end, or cancellation invalidates an approval still
+in flight. The package keeps revision counters for race detection, with no separate
+persisted authorization store or fresh-message gate.
 
 The reviewer receives only these tools, bound to its active review:
 
@@ -209,7 +220,8 @@ normal Maki configuration. Python 3 is needed only for these integration tests.
 The integration suite verifies native allow/deny bypasses, one-call automatic
 approval, real interactive human fallback, headless denial, restricted asynchronous
 inspection, native folder trust and option merging, malformed responses, timeout
-cleanup, JIT execution, and managed Git installation with capability prompts and
+cleanup, JIT execution, saved-chat resume without fresh human input, unclear
+authorization fallback, and managed Git installation with capability prompts and
 a locked commit.
 
 The Ubuntu CI workflow pins Maki 0.6.4 and checks its release archive's SHA-256.

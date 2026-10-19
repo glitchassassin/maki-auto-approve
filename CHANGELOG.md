@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1 — 2026-10-19
+
+- Use Maki's recorded user turns as authorization evidence after restart, reload,
+  and chat resume. Remove the in-memory message capture and fresh-message gate.
+- Keep user instructions separate from observations, tool output, hidden messages,
+  and assistant summaries. Preserve instruction order and label omitted evidence.
+- Require medium or high authorization for every automatic approval; low or unknown
+  authorization falls back to Maki's ordinary prompt even if the model returns allow.
+- Revalidate recorded user instructions before approval and retain final synchronous
+  input-revision and cancellation checks after asynchronous reads.
+- Test saved-chat resume in a fresh stock Maki process without new human input,
+  interactive uncertainty fallback, and input/history races.
+
 ## 0.2.0 — 2026-10-19
 
 - Configure the installed package through `plugins["maki-auto-approve"]` in Maki's

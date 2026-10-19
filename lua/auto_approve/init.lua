@@ -7,7 +7,7 @@ local M = {}
 function M.setup()
   local settings = config.register()
   require("auto_approve.inspect").setup()
-  local captured, active, results = context.new(), 0, {}
+  local evidence, active, results = context.new(), 0, {}
   local function remember(sid, req, status, reason, assessment, limit)
     local records = results[sid] or {}
     records[#records + 1] = { tool = req.tool, status = status, reason = util.clean(reason, 1000),
@@ -20,22 +20,14 @@ function M.setup()
   end
 
   maki.api.set_slot("agent.user_message", function(prev, message, ctx)
-    -- Record the original human text, not additions introduced by downstream layers.
-    local source, original = message.source, message.text
-    -- The native identity continuation returns (message, ctx), not (value, err).
-    local result, extra = prev(message, ctx)
-    local dropped = result == nil and type(extra) == "string"
-    local emptied = type(result) == "table" and type(result.text) == "string"
-      and not result.text:match("%S") and (message.images or 0) == 0
-    if not dropped and not emptied then
-      captured.capture(ctx.session_id, original, source, message.images)
-    end
-    return result, extra
+    -- Invalidate pending decisions immediately, even before history is updated.
+    evidence.observe(ctx.session_id, message.text, message.source, message.images)
+    return prev(message, ctx)
   end)
   maki.api.create_autocmd({ "SessionReset", "SessionEnd" }, {
     callback = function(ev)
       local sid = ev.data.session_id
-      captured.clear(sid)
+      evidence.clear(sid)
       results[sid] = nil
     end,
   })
@@ -53,7 +45,7 @@ function M.setup()
       cfg = util.copy(settings)
       cfg.root = maki.fs.root(cwd, ".git") or cwd
       if active >= cfg.reviewer.max_concurrent then error_text = "Reviewer concurrency limit reached."; return end
-      local prompt, build_err, revision = captured.build(sid, ctx:task_id(), util.copy(req), cfg)
+      local prompt, build_err, proof = evidence.build(sid, ctx:task_id(), util.copy(req), cfg)
       if not prompt then error_text = build_err; return end
       active = active + 1
       local released = false
@@ -66,10 +58,12 @@ function M.setup()
       if not ran then error_text = "Review failed: " .. tostring(value); return end
       assessment, error_text = value, run_err
       if not assessment or assessment.outcome ~= "allow" then return end
+      local unchanged, changed_err = evidence.unchanged(sid, proof)
+      if not unchanged then error_text = changed_err; return end
       -- Inspection and conversation reads may yield. No yield may occur between
       -- this final authorization/cancellation check and publishing the allow.
       if ctx:cancelled() then error_text = "Call was cancelled during review."; return end
-      if captured.revision(sid) ~= revision then error_text = "User instructions changed during review."; return end
+      if evidence.revision(sid) ~= proof.revision then error_text = "User instructions changed during review."; return end
       accepted = true
     end)
     if not ok then error_text = "Review failed: " .. tostring(thrown) end
@@ -101,7 +95,7 @@ function M.setup()
       win:close()
     end,
   })
-  return { context = captured, results = results }
+  return { context = evidence, results = results }
 end
 
 return M

@@ -10,7 +10,7 @@ M.spec = {
   reviewer_max_concurrent = { default = 2, min = 1, desc = "Concurrent reviews; excess calls need human approval (1–8)." },
   context_max_messages = { default = 40, min = 1, desc = "Recent conversation messages included in a review (1–200)." },
   context_max_bytes = { default = 48000, min = 2048, desc = "Action and conversation context byte budget (2048–200000)." },
-  context_max_user_bytes = { default = 16000, min = 512, desc = "Captured human instruction byte budget (512–64000)." },
+  context_max_user_bytes = { default = 16000, min = 512, desc = "Recorded user instruction byte budget (512–64000)." },
   inspection_enabled = { default = true, desc = "Offer the reviewer bounded read-only inspection tools." },
   inspection_max_file_bytes = { default = 65536, min = 256, desc = "Bytes per inspected regular UTF-8 file (256–262144)." },
   inspection_max_directory_entries = { default = 100, min = 1, desc = "Entries per one-level directory listing (1–1000)." },

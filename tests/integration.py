@@ -82,12 +82,14 @@ def run_terminal(command, cwd, env, responses):
 
 
 class NativeTests(unittest.TestCase):
-    def run_case(self, *, rule=None, outcome="allow", inspect=False, override=False,
+    def run_case(self, *, rule=None, outcome="allow", authorization="high", inspect=False, override=False,
                  malformed=False, timeout=False, project_disabled=False, jit=False,
                  yolo=False, forced_ask=False, trust_project=True, changed_project=False,
                  interactive=False, managed=False, native_trust_command=False,
-                 trust_mode="session", global_options=None, project_options=None, global_disabled=False):
+                 trust_mode="session", global_options=None, project_options=None, global_disabled=False,
+                 resume=False):
         requests = []
+        seeding = resume
         with tempfile.TemporaryDirectory(prefix="maki-auto-approve-") as temporary:
             base = Path(temporary)
             project = base / "project"
@@ -130,9 +132,11 @@ class NativeTests(unittest.TestCase):
                             call = ("auto_approve_read_file", {"path": str(project / "script.sh"), "review_id": review_id})
                         else:
                             text = "invalid JSON" if malformed else json.dumps({
-                                "risk_level": "low", "user_authorization": "high",
+                                "risk_level": "low", "user_authorization": authorization,
                                 "outcome": outcome, "rationale": "The probe is a bounded test operation.",
                             })
+                    elif seeding:
+                        text = "ready to continue"
                     elif not has_result:
                         call = ("auto_approve_probe", {"value": "once"})
                     else:
@@ -238,7 +242,32 @@ maki.setup({ ui = { splash_animation = false },
                 command = [MAKI] + ([] if jit else ["--no-jit"]) + (["--yolo"] if yolo else [])
                 if project_options and trust_project and trust_mode == "session" and not native_trust_command:
                     command += ["--trust"]
-                if interactive or managed:
+                if resume:
+                    seed = subprocess.run(command + ["-p", "-m", "mock/worker", "--output-format", "json",
+                        "Run auto_approve_probe once for this local test."], cwd=project, env=env,
+                        capture_output=True, text=True, timeout=25)
+                    self.assertEqual(seed.returncode, 0, seed.stdout + seed.stderr)
+                    session_id = json.loads(seed.stdout)["session_id"]
+                    self.assertFalse((project / "executed").exists())
+                    seeding = False
+                    fresh_input = base / "fresh-input"
+                    with (config_dir / "init.lua").open("a") as init:
+                        init.write('''
+maki.api.set_slot("agent.user_message", function(prev, message, ctx)
+  if message.source ~= "plugin" then maki.fs.write(__FRESH_INPUT__, "unexpected") end
+  return prev(message, ctx)
+end)
+maki.api.register_command({ name = "/auto-approve-test-wake", description = "Resume test work using an observation",
+  handler = function()
+    maki.session.notify("Continue the pending work.", { session = maki.session.current(), wake = true })
+  end,
+})
+'''.replace("__FRESH_INPUT__", lua_value(str(fresh_input))))
+                    process, answered = run_terminal(command + ["--resume", session_id, "--exit-on-done", "-m", "mock/worker"],
+                        project, env, [(r"ready to continue", b"/auto-approve-test-wake\r")])
+                    self.assertEqual(answered, 1, process.stdout[-10000:])
+                    self.assertFalse(fresh_input.exists(), "The resumed test must not send a fresh human message")
+                elif interactive or managed:
                     command += ["--exit-on-done", "-m", "mock/worker"]
                     if not native_trust_command:
                         command += ["Run auto_approve_probe once for this local test."]
@@ -249,7 +278,7 @@ maki.setup({ ui = { splash_animation = false },
                         responses = [(r"\[restricted\]", b"/trust\r"),
                                      (lambda: project_marker.exists(),
                                       b"Run auto_approve_probe once for this local test.\r")]
-                    elif outcome == "deny":
+                    elif outcome == "deny" or authorization in ("unknown", "low"):
                         responses = [(r"Permission Required", b"y")]
                     process, answered = run_terminal(command, project, env, responses)
                     self.assertEqual(answered, len(responses), process.stdout[-10000:])
@@ -279,6 +308,28 @@ maki.setup({ ui = { splash_animation = false },
         main = next(r for r in result["requests"] if "You review one pending Maki tool call" not in json.dumps(r))
         names = {t["function"]["name"] for t in main.get("tools", [])}
         self.assertNotIn("auto_approve_read_file", names)
+
+    def test_resumed_chat_reuses_history_without_fresh_user_input(self):
+        result = self.run_case(resume=True)
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertEqual(len(result["reviews"]), 1, result["diagnostic"])
+        prompt = next(m["content"] for m in result["reviews"][0]["messages"] if m["role"] == "user")
+        payload = json.loads(prompt)
+        self.assertEqual([entry["text"] for entry in payload["user_instructions"]],
+                         ["Run auto_approve_probe once for this local test."])
+        self.assertIn("Continue the pending work.", json.dumps(payload["untrusted_conversation_evidence"]))
+
+    def test_unclear_authorization_does_not_execute_headlessly(self):
+        for authorization in ("unknown", "low"):
+            with self.subTest(authorization=authorization):
+                result = self.run_case(authorization=authorization)
+                self.assertFalse(result["executed"], result["diagnostic"])
+                self.assertEqual(len(result["reviews"]), 1, result["diagnostic"])
+
+    def test_unclear_authorization_falls_back_to_interactive_prompt(self):
+        result = self.run_case(authorization="unknown", interactive=True)
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertEqual(len(result["reviews"]), 1, result["diagnostic"])
 
     def test_explicit_allow_skips_reviewer(self):
         result = self.run_case(rule="allow")

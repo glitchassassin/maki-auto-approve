@@ -15,9 +15,11 @@ function M.parse(text)
       or type(value.rationale) ~= "string" or not value.rationale:match("%S") or #value.rationale > 2000 then
     return nil, "Reviewer response does not satisfy the decision schema."
   end
-  if value.outcome == "allow" and (value.risk_level == "critical"
-      or (value.risk_level == "high" and value.user_authorization ~= "medium" and value.user_authorization ~= "high")) then
-    return nil, "Reviewer decision is inconsistent with the automatic approval thresholds."
+  if value.outcome == "allow" then
+    if value.risk_level == "critical" then return nil, "Critical risk requires human approval." end
+    if value.user_authorization ~= "medium" and value.user_authorization ~= "high" then
+      return nil, "User authorization is unclear; human approval is required."
+    end
   end
   return value
 end

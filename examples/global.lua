@@ -8,9 +8,9 @@ maki.setup({
       reviewer_timeout_ms = 45000, -- 100–55000; within Maki's 60-second hook window.
       reviewer_max_inspections = 8, -- 1–32.
       reviewer_max_concurrent = 2, -- 1–8; excess calls need human approval.
-      context_max_messages = 40, -- 1–200.
+      context_max_messages = 40, -- 1–200; recent conversation evidence.
       context_max_bytes = 48000, -- 2048–200000.
-      context_max_user_bytes = 16000, -- 512–64000.
+      context_max_user_bytes = 16000, -- 512–64000; user turns from available history.
       inspection_enabled = true,
       inspection_max_file_bytes = 65536, -- 256–262144.
       inspection_max_directory_entries = 100, -- 1–1000.
