@@ -25,16 +25,18 @@ with an observation, without sending a new human message to the agent.
 Native trust tests verify restricted, saved, policy-based, `/trust`, and `--trust`
 configuration loading on stock Maki. No patched binary is required.
 
-Review `CHANGELOG.md`, the global/project Lua examples, `plugin.toml`, `LICENSE`, and
-`NOTICE`. The prompt check verifies upstream Git blob hashes and the generated Lua
-bundle; review changes to `vendor/codex/source.json` against the intended upstream
-revision when updating the baseline. Keep the README's minimum Maki version and
-CI binary pin in agreement.
+Run these commands from the repository root. Review [CHANGELOG.md](../CHANGELOG.md),
+the [global](../examples/global.lua)/[project](../examples/project.lua) Lua examples,
+`plugin.toml`, `LICENSE`, and `NOTICE`. The prompt check verifies upstream Git blob
+hashes and the generated Lua bundle; review changes to `vendor/codex/source.json`
+against the intended upstream revision when updating the baseline. Keep the
+documented minimum Maki version and CI binary pin in agreement.
 
 ## Prepare the release
 
-Choose an unused version. Update `VERSION`, the README's pinned installation
-version, and `CHANGELOG.md`. Commit the validated changes and tag that commit:
+Choose an unused version. Update `VERSION`, the pinned installation versions in
+the [README](../README.md) and [installation guide](installation.md), and
+`CHANGELOG.md`. Commit the validated changes and tag that commit:
 
 ```sh
 release_version=$(cat VERSION)
@@ -53,3 +55,5 @@ tag using the matching changelog entry as release notes.
 Check managed installation from the repository URL and release tag in the README.
 Maki's package manager installs the tagged Git contents; no separate package
 archive is required.
+
+[Documentation index](README.md)
