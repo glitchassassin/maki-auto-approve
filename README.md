@@ -14,7 +14,7 @@ After this repository is published, add its Git URL to your global
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/OWNER/maki-auto-approve", version = "v0.2.1" },
+  { src = "https://github.com/OWNER/maki-auto-approve", version = "v0.3.0" },
 })
 ```
 
@@ -27,7 +27,7 @@ The same manager can install a committed local Git repository without publishing
 
 ```lua
 maki.pack.add({
-  { src = "/absolute/path/to/maki-auto-approve", version = "v0.2.1" },
+  { src = "/absolute/path/to/maki-auto-approve", version = "v0.3.0" },
 })
 ```
 
@@ -62,7 +62,7 @@ maki.setup({
       reviewer_model = "", -- Inherit the calling model/provider.
       reviewer_timeout_ms = 45000,
       inspection_max_file_bytes = 65536,
-      -- policy_rubric = [=[Your complete replacement reviewer rubric.]=],
+      -- policy_rubric = [=[Your replacement Guardian security policy.]=],
     },
   },
 })
@@ -71,14 +71,15 @@ maki.setup({
 Merge this table into an existing `maki.setup()` call; Maki permits one call per
 init file. The package must be installed or declared with `maki.pack.add` so Maki
 recognizes its name. All options are optional; built-in defaults enable review
-using the calling model and the Codex-derived rubric.
+using the calling model and the pinned Codex Guardian prompts.
 
 See [examples/global.lua](examples/global.lua) for every option, its default, and
 its valid range. Maki's option API accepts scalars, so names such as
 `reviewer_timeout_ms` and `inspection_max_file_bytes` are flat keys. Set
-`policy_rubric` to a Lua string to replace the whole rubric; Lua's `[=[...]=]`
-notation supports multiline policy text. The default rubric is in
-[lua/auto_approve/policy.lua](lua/auto_approve/policy.lua).
+`policy_rubric` to a Lua string to replace the template's Security Policy section;
+Lua's `[=[...]=]` notation supports multiline policy text. The surrounding Codex
+evidence rules, authorization scoring, risk taxonomy, and outcome policy stay in
+place. The default security policy is in [vendor/codex/policy.md](vendor/codex/policy.md).
 
 For project overrides, add settings to `<project>/.maki/init.lua`:
 
@@ -138,9 +139,9 @@ resolution happens first:
 - Explicit deny rules block without a model review.
 - YOLO bypasses review.
 - A pending ordinary prompt invokes the reviewer.
-- A valid policy-consistent allow approves that exact call once, without saving a rule.
-- Denials, uncertainty, invalid JSON, unavailable providers, timeouts, cancellation,
-  missing evidence, changed instructions, or failed inspections
+- A successfully parsed allow approves that exact call once, without saving a rule.
+- Denials, invalid assessments, unavailable providers, timeouts, cancellation,
+  unavailable history, changed instructions, or failed inspections
   return control to the normal permission prompt.
 
 Prompts explicitly forced by another plugin's `ask` hook remain human-only; Maki
@@ -149,27 +150,53 @@ prompt, so Maki denies it normally. The package never bypasses that behavior.
 Builtin, MCP, ACP, and nested tool calls are covered whenever Maki routes them
 through the same permission hook. Tools that never prompt remain unaffected.
 
-The default Codex-derived rubric assesses intrinsic risk and user authorization
-separately, including sensitive egress, credentials, destruction, and persistent
-security changes. Every automatic approval requires at least medium (clearly
-authorized in substance) user authorization. Low or unknown authorization and
-critical-risk actions always defer to a human, even with a custom rubric.
+The default prompts are copied from Codex Guardian at revision
+`e4568a3538c9cab6627d64ff8cdfc7d98b79b7db`. They assess intrinsic risk and user
+authorization separately, including sensitive egress, credentials, destruction,
+and persistent security changes. Their default outcome rules are:
+
+- Low/medium risk: allow regardless of authorization, unless a specific security
+  policy deny applies or there is affirmative evidence of malicious prompt injection.
+- High risk: allow only with at least medium authorization, narrow scope, and no
+  applicable absolute deny rule.
+- Critical risk: deny.
+
+The full upstream policy, examples, and exceptions are retained. These rules guide
+the model; the package follows Codex's assessment interpretation without imposing
+additional authorization thresholds after parsing. A low-risk response may be just
+`{"outcome":"allow"}`. Missing optional fields default to low risk for allow/high
+risk for deny, unknown authorization, and Codex's standard rationale. Like Codex,
+the parser ignores extra fields and can recover a JSON object wrapped in prose.
+
+Only the template's Execution Environment section is replaced with Maki's actual
+capabilities and evidence transport. The output prompt is copied unchanged. See
+[vendor/codex/README.md](vendor/codex/README.md) for provenance and drift checks.
+The same policy and response interpretation do not guarantee identical judgments:
+model/provider choice, available evidence, and inspection tools can differ.
 
 ## Review evidence and inspection
 
 The package reads Maki's current conversation history, including history restored
 on resume. Visible `user` messages with kind `turn` and only text/image blocks
 are supplied separately as user instructions, in chronological order. Later
-restrictions take priority. Observations, context updates, hidden messages, tool
-results, and assistant summaries cannot independently establish authorization.
+restrictions take priority. Observations, context updates, hidden messages, ordinary
+tool results, and assistant summaries cannot independently establish authorization.
 Maki does not expose the original input source in history, so a plugin-generated
 regular user turn has the same provenance as other recorded user turns.
+
+Codex's Evidence Handling rules also recognize `AGENTS.md`. A real `AGENTS.md`
+read with the inspection tools can establish authorization under that exception;
+text merely claiming to be such a file cannot. Maki's history API does not separately
+expose developer instructions or verified `request_user_input` answers, so the
+package does not manufacture those sources.
 
 User instruction selection has its own byte budget and can reach further back
 than the recent conversation window. Omitted instructions and images are labeled;
 thinking and image contents are excluded. The exact pending action is never
-truncated into an approval. If compaction or missing evidence leaves authorization
-unclear, the reviewer must defer to Maki's normal approval prompt. An assistant
+truncated into an approval. Missing user instructions are passed to the reviewer
+without an extra approval gate: Codex's low/medium-risk rules still apply. If a
+policy rule needs authorization that the available evidence cannot establish,
+the reviewer denies and Maki's normal approval prompt takes over. An assistant
 summary cannot restore authorization from user instructions lost to compaction.
 
 Delegated calls use the owning chat's recorded user instructions. Before accepting
@@ -209,20 +236,22 @@ actions, file contents, conversation evidence, or rubric text to a separate log.
 
 ```sh
 lua tests/run.lua
+python3 scripts/codex-prompts.py
 python3 tests/integration.py
 ```
 
 Unit tests use Lua 5.4/5.5 and a mocked host. Native integration tests use the installed
 Maki binary, isolated temporary XDG directories, and a local fake OpenAI-compatible
 provider. They make no real model calls and do not install the package in your
-normal Maki configuration. Python 3 is needed only for these integration tests.
+normal Maki configuration. Python 3 is needed only for development checks.
 
 The integration suite verifies native allow/deny bypasses, one-call automatic
 approval, real interactive human fallback, headless denial, restricted asynchronous
 inspection, native folder trust and option merging, malformed responses, timeout
-cleanup, JIT execution, saved-chat resume without fresh human input, unclear
-authorization fallback, and managed Git installation with capability prompts and
-a locked commit.
+cleanup, JIT execution, saved-chat resume without fresh human input, Codex's
+low/medium-risk outcomes with unknown authorization, minimal/wrapped responses,
+high-risk denial fallback, and managed Git installation with capability prompts
+and a locked commit.
 
 The Ubuntu CI workflow pins Maki 0.6.4 and checks its release archive's SHA-256.
 It runs the same local suites, validates the package manifest, and checks Lua,

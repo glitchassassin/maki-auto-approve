@@ -7,6 +7,7 @@ and tagged entirely locally. A GitHub repository or release is not required.
 
 ```sh
 lua tests/run.lua
+python3 scripts/codex-prompts.py
 python3 tests/integration.py
 find lua plugin tests examples -name '*.lua' -exec luac -p {} \;
 sh -n scripts/install-local.sh
@@ -18,14 +19,17 @@ They use isolated XDG directories and a local fake provider, make no real model
 calls, and leave normal Maki configuration unchanged. Managed-install tests make
 their own temporary Git fixture, explicitly accept its install/capability prompts,
 and assert the lockfile commit. The interactive fallback test explicitly approves
-one pending probe in a real terminal after the model declines or reports unclear
-authorization. Resume tests restart Maki and wake saved work with an observation,
-without sending a new human message to the agent.
+one pending probe in a real terminal after the model denies, including high-risk
+actions with unknown authorization. Resume tests restart Maki and wake saved work
+with an observation, without sending a new human message to the agent.
 Native trust tests verify restricted, saved, policy-based, `/trust`, and `--trust`
 configuration loading on stock Maki. No patched binary is required.
 
 Review `CHANGELOG.md`, the global/project Lua examples, `plugin.toml`, `LICENSE`, and
-`NOTICE`. Keep the README's minimum Maki version and CI binary pin in agreement.
+`NOTICE`. The prompt check verifies upstream Git blob hashes and the generated Lua
+bundle; review changes to `vendor/codex/source.json` against the intended upstream
+revision when updating the baseline. Keep the README's minimum Maki version and
+CI binary pin in agreement.
 The `OWNER` URL in the README is intentionally a placeholder until a public
 repository is selected; replace it with the actual URL before publishing.
 
@@ -34,7 +38,7 @@ repository is selected; replace it with the actual URL before publishing.
 Make an ordinary release commit after validation and tag that exact commit:
 
 ```sh
-git tag -a v0.2.1 -m "Maki Auto Approve 0.2.1"
+git tag -a v0.3.0 -m "Maki Auto Approve 0.3.0"
 ```
 
 An existing tag must never be silently moved. Check that the working tree is

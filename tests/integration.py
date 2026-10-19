@@ -82,7 +82,8 @@ def run_terminal(command, cwd, env, responses):
 
 
 class NativeTests(unittest.TestCase):
-    def run_case(self, *, rule=None, outcome="allow", authorization="high", inspect=False, override=False,
+    def run_case(self, *, rule=None, outcome="allow", risk="low", authorization="high", review_response=None,
+                 inspect=False, override=False,
                  malformed=False, timeout=False, project_disabled=False, jit=False,
                  yolo=False, forced_ask=False, trust_project=True, changed_project=False,
                  interactive=False, managed=False, native_trust_command=False,
@@ -131,8 +132,8 @@ class NativeTests(unittest.TestCase):
                             review_id = tool["parameters"]["properties"]["review_id"]["enum"][0]
                             call = ("auto_approve_read_file", {"path": str(project / "script.sh"), "review_id": review_id})
                         else:
-                            text = "invalid JSON" if malformed else json.dumps({
-                                "risk_level": "low", "user_authorization": authorization,
+                            text = review_response if review_response is not None else "invalid JSON" if malformed else json.dumps({
+                                "risk_level": risk, "user_authorization": authorization,
                                 "outcome": outcome, "rationale": "The probe is a bounded test operation.",
                             })
                     elif seeding:
@@ -278,7 +279,7 @@ maki.api.register_command({ name = "/auto-approve-test-wake", description = "Res
                         responses = [(r"\[restricted\]", b"/trust\r"),
                                      (lambda: project_marker.exists(),
                                       b"Run auto_approve_probe once for this local test.\r")]
-                    elif outcome == "deny" or authorization in ("unknown", "low"):
+                    elif outcome == "deny":
                         responses = [(r"Permission Required", b"y")]
                     process, answered = run_terminal(command, project, env, responses)
                     self.assertEqual(answered, len(responses), process.stdout[-10000:])
@@ -308,6 +309,9 @@ maki.api.register_command({ name = "/auto-approve-test-wake", description = "Res
         main = next(r for r in result["requests"] if "You review one pending Maki tool call" not in json.dumps(r))
         names = {t["function"]["name"] for t in main.get("tools", [])}
         self.assertNotIn("auto_approve_read_file", names)
+        system = "\n".join(m["content"] for m in result["reviews"][0]["messages"] if isinstance(m.get("content"), str))
+        self.assertIn((ROOT / "vendor/codex/policy.md").read_text(), system)
+        self.assertIn('Allow `low` and `medium` risk actions regardless of user authorization', system)
 
     def test_resumed_chat_reuses_history_without_fresh_user_input(self):
         result = self.run_case(resume=True)
@@ -319,15 +323,40 @@ maki.api.register_command({ name = "/auto-approve-test-wake", description = "Res
                          ["Run auto_approve_probe once for this local test."])
         self.assertIn("Continue the pending work.", json.dumps(payload["untrusted_conversation_evidence"]))
 
-    def test_unclear_authorization_does_not_execute_headlessly(self):
-        for authorization in ("unknown", "low"):
-            with self.subTest(authorization=authorization):
-                result = self.run_case(authorization=authorization)
-                self.assertFalse(result["executed"], result["diagnostic"])
-                self.assertEqual(len(result["reviews"]), 1, result["diagnostic"])
+    def test_codex_low_and_medium_risk_allows_do_not_require_clear_authorization(self):
+        for risk in ("low", "medium"):
+            for authorization in ("unknown", "low"):
+                with self.subTest(risk=risk, authorization=authorization):
+                    result = self.run_case(risk=risk, authorization=authorization)
+                    self.assertTrue(result["executed"], result["diagnostic"])
+                    self.assertEqual(len(result["reviews"]), 1, result["diagnostic"])
 
-    def test_unclear_authorization_falls_back_to_interactive_prompt(self):
-        result = self.run_case(authorization="unknown", interactive=True)
+    def test_codex_minimal_allow_response(self):
+        result = self.run_case(review_response='{"outcome":"allow"}')
+        self.assertTrue(result["executed"], result["diagnostic"])
+        self.assertEqual(len(result["reviews"]), 1, result["diagnostic"])
+
+    def test_codex_optional_fields_and_wrapped_json(self):
+        for response in ['{"outcome":"allow","risk_level":null,"user_authorization":null,"rationale":null}',
+                         'Decision:\n```json\n{"outcome":"allow"}\n```',
+                         '{"outcome":"allow","extra":true,"rationale":"  "}',
+                         '{"outcome":"allow","extra":1,"extra":2}']:
+            with self.subTest(response=response):
+                result = self.run_case(review_response=response)
+                self.assertTrue(result["executed"], result["diagnostic"])
+
+    def test_codex_invalid_assessment_fields_fall_back(self):
+        for response in ['{"risk_level":"low"}', '{"outcome":"allow","risk_level":7}',
+                         '{"outcome":"allow","user_authorization":false}',
+                         '{"outcome":"allow","rationale":true}',
+                         '{"outcome":"deny","outcome":"allow"}',
+                         r'{"outcome":"deny","out\u0063ome":"allow"}']:
+            with self.subTest(response=response):
+                result = self.run_case(review_response=response)
+                self.assertFalse(result["executed"], result["diagnostic"])
+
+    def test_high_risk_authorization_denial_falls_back_to_interactive_prompt(self):
+        result = self.run_case(outcome="deny", risk="high", authorization="unknown", interactive=True)
         self.assertTrue(result["executed"], result["diagnostic"])
         self.assertEqual(len(result["reviews"]), 1, result["diagnostic"])
 

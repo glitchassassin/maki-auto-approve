@@ -15,7 +15,7 @@ M.spec = {
   inspection_max_file_bytes = { default = 65536, min = 256, desc = "Bytes per inspected regular UTF-8 file (256–262144)." },
   inspection_max_directory_entries = { default = 100, min = 1, desc = "Entries per one-level directory listing (1–1000)." },
   logging_history_size = { default = 50, min = 1, desc = "Review outcomes retained in memory per session (1–200)." },
-  policy_rubric = { default = policy.rubric, desc = "Complete replacement reviewer rubric (1–64000 bytes)." },
+  policy_rubric = { default = policy.rubric, desc = "Replacement Guardian security policy (1–64000 bytes)." },
 }
 
 local maxima = {

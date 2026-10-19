@@ -5,22 +5,65 @@ local M = {}
 local risks = { low = true, medium = true, high = true, critical = true }
 local auth = { unknown = true, low = true, medium = true, high = true }
 
+local function repeated_field(text)
+  -- Maki decodes through a JSON value, which loses duplicate keys. Codex's
+  -- serde struct rejects duplicates of known fields, while ignoring extra fields.
+  local known = { risk_level = true, user_authorization = true, outcome = true, rationale = true }
+  local seen, depth, previous, i = {}, 0, nil, 1
+  while i <= #text do
+    local char = text:sub(i, i)
+    if char == '"' then
+      local finish = i + 1
+      while finish <= #text do
+        local current = text:sub(finish, finish)
+        if current == "\\" then finish = finish + 2
+        elseif current == '"' then break
+        else finish = finish + 1 end
+      end
+      if depth == 1 and (previous == "{" or previous == ",") then
+        local key = util.decode(text:sub(i, finish))
+        if known[key] then
+          if seen[key] then return true end
+          seen[key] = true
+        end
+      end
+      previous, i = '"', finish
+    elseif char == "{" or char == "[" then depth, previous = depth + 1, char
+    elseif char == "}" or char == "]" then depth, previous = depth - 1, char
+    elseif char:match("%S") then previous = char end
+    i = i + 1
+  end
+  return false
+end
+
+local function parse_payload(text)
+  local value = util.decode(text)
+  if type(value) ~= "table" or (value.outcome ~= "allow" and value.outcome ~= "deny") then return nil end
+  if repeated_field(text) then return nil end
+  if (value.risk_level ~= nil and not risks[value.risk_level])
+      or (value.user_authorization ~= nil and not auth[value.user_authorization])
+      or (value.rationale ~= nil and type(value.rationale) ~= "string") then return nil end
+  local allowed = value.outcome == "allow"
+  return {
+    outcome = value.outcome,
+    risk_level = value.risk_level or (allowed and "low" or "high"),
+    user_authorization = value.user_authorization or "unknown",
+    rationale = value.rationale and value.rationale:match("%S") and value.rationale
+      or (allowed and "Auto-review returned a low-risk allow decision."
+        or "Auto-review returned a deny decision without a rationale."),
+  }
+end
+
 function M.parse(text)
-  local value, err = util.decode(text)
-  if type(value) ~= "table" then return nil, err or "Reviewer did not return a JSON object." end
-  local keys = { risk_level = true, user_authorization = true, outcome = true, rationale = true }
-  for key in pairs(value) do if not keys[key] then return nil, "Unexpected reviewer response field." end end
-  if not risks[value.risk_level] or not auth[value.user_authorization]
-      or (value.outcome ~= "allow" and value.outcome ~= "deny")
-      or type(value.rationale) ~= "string" or not value.rationale:match("%S") or #value.rationale > 2000 then
-    return nil, "Reviewer response does not satisfy the decision schema."
-  end
-  if value.outcome == "allow" then
-    if value.risk_level == "critical" then return nil, "Critical risk requires human approval." end
-    if value.user_authorization ~= "medium" and value.user_authorization ~= "high" then
-      return nil, "User authorization is unclear; human approval is required."
-    end
-  end
+  if type(text) ~= "string" then return nil, "Reviewer did not return assessment text." end
+  local value = parse_payload(text)
+  if value then return value end
+  -- Match Codex's recovery of a JSON object surrounded by prose or markdown.
+  local first = text:find("{", 1, true)
+  local last = text:reverse():find("}", 1, true)
+  last = last and (#text - last + 1)
+  if first and last and first < last then value = parse_payload(text:sub(first, last)) end
+  if not value then return nil, "Reviewer response does not satisfy the Codex assessment schema." end
   return value
 end
 
@@ -55,7 +98,7 @@ function M.run(ctx, config, prompt, cwd, task)
   if not closed then return nil, "Reviewer cleanup failed: " .. tostring(close_err) end
   if not ok then return nil, "Reviewer failed: " .. tostring(result) end
   if err or not result then return nil, "Reviewer failed: " .. tostring(err) end
-  if type(result.text) ~= "string" or #result.text > 8000 then return nil, "Invalid reviewer response size." end
+  if type(result.text) ~= "string" then return nil, "Reviewer did not return assessment text." end
   local assessment, parse_err = M.parse(result.text)
   if not assessment then return nil, parse_err end
   if assessment.outcome == "allow" then

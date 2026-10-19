@@ -1,7 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-10-19
 
+- Bundle Codex Guardian's full default policy, policy template, and output contract
+  from revision `e4568a3538c9cab6627d64ff8cdfc7d98b79b7db`, with verified upstream
+  Git blob hashes and a reproducible Lua bundle checked in CI.
+- Preserve upstream evidence, authorization, risk, and outcome guidance verbatim;
+  replace only the Execution Environment section with Maki's real capabilities.
+- Follow Codex's low/medium-risk authorization thresholds and assessment parsing,
+  including minimal allows, optional fields, defaults, extra fields, and wrapped JSON.
+- Remove the additional host authorization thresholds and empty-user-history gate.
+  Keep one-call approvals, human fallback, native trust, and race protection.
+- Retain `policy_rubric` as a replacement for the template's Security Policy section;
+  the surrounding Codex assessment guidance remains in place.
 - Correct the local installer's restart/reload guidance to reflect reuse of
   recorded user instructions, without requiring a fresh human message.
 

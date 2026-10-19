@@ -15,8 +15,8 @@ maki.setup({
       inspection_max_file_bytes = 65536, -- 256–262144.
       inspection_max_directory_entries = 100, -- 1–1000.
       logging_history_size = 50, -- 1–200.
-      -- Omit policy_rubric to use the built-in Codex-derived rubric.
-      -- policy_rubric = [=[Your complete replacement reviewer rubric.]=],
+      -- Omit policy_rubric to use Codex Guardian's default security policy.
+      -- policy_rubric = [=[Your replacement Guardian security policy.]=],
     },
   },
 })

@@ -33,6 +33,7 @@ jobs:
           maki --version
           find lua plugin tests examples -name '*.lua' -exec luac5.4 -p {} \;
           sh -n scripts/install-local.sh
+          python3 scripts/codex-prompts.py
           python3 -c 'import pathlib,tomllib; [tomllib.loads(p.read_text()) for p in pathlib.Path(".").rglob("*.toml")]'
           git diff --check
       - name: Unit tests

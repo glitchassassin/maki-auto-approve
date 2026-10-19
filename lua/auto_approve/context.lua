@@ -41,7 +41,6 @@ function M.new()
     local history, err = maki.session.messages({ session = sid })
     if not history then return nil, "Conversation evidence unavailable: " .. tostring(err) end
     local instructions = user_instructions(history)
-    if #instructions == 0 then return nil, "No recorded user instructions are available for authorization." end
     local trusted, user_bytes, omitted = {}, 0, false
     for i = #instructions, 1, -1 do
       local entry = instructions[i]
@@ -51,7 +50,7 @@ function M.new()
         user_bytes = user_bytes + #encoded
       else omitted = true; break end
     end
-    if #trusted == 0 then return nil, "User instructions exceed the configured evidence budget." end
+    if #instructions > 0 and #trusted == 0 then return nil, "User instructions exceed the configured evidence budget." end
     local payload = {
       user_instructions = trusted,
       user_instruction_source = "Maki recorded visible user turns; original input source is unavailable.",

@@ -6,7 +6,7 @@ maki.setup({
       reviewer_timeout_ms = 30000,
       inspection_max_file_bytes = 32768,
       -- reviewer_model = "provider/model-id",
-      -- policy_rubric = [=[Your complete replacement reviewer rubric.]=],
+      -- policy_rubric = [=[Your replacement Guardian security policy.]=],
       -- enabled = false, -- Disable the package in this trusted project.
     },
   },

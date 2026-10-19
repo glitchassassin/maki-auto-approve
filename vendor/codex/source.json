@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/openai/codex",
+  "revision": "e4568a3538c9cab6627d64ff8cdfc7d98b79b7db",
+  "files": {
+    "policy_template.md": {
+      "path": "codex-rs/prompts/templates/guardian/policy_template.md",
+      "git_blob": "74567d7c62a39f708f608799cf76e2d05d36bb28"
+    },
+    "policy.md": {
+      "path": "codex-rs/prompts/templates/guardian/policy.md",
+      "git_blob": "a0c5ed2e32849d0fa3ffef637caa90e85c630d5b"
+    },
+    "assessment.rs": {
+      "path": "codex-rs/ext/guardian-reviewer/src/assessment.rs",
+      "git_blob": "80c5af6b74070d21b47d716068be913f187636cb"
+    }
+  }
+}
